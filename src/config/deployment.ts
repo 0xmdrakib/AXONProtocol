@@ -15,6 +15,8 @@ export type DeploymentFile = {
   vaultFactory?: Address;
   settler?: Address;
   cctpReceiver?: Address;
+  factoryPermission?: boolean;
+  settlerPermission?: boolean;
   vault?: Address;
   source?: string;
   deployedAt?: string;
@@ -40,11 +42,39 @@ export function loadStoredDeployment(deployer: Address, chainId = arcTestnet.id)
       deployment.chainId !== chainId ||
       !validAddress(deployment.deployer) ||
       getAddress(deployment.deployer) !== getAddress(deployer) ||
-      !validAddress(deployment.vaultFactory) ||
-      !validAddress(deployment.auditLog) ||
       !validAddress(deployment.usdc)
     ) {
       return null;
+    }
+
+    const addressFields: Array<keyof DeploymentFile> = [
+      "policyEngine",
+      "auditLog",
+      "yieldRouter",
+      "vaultFactory",
+      "settler",
+      "cctpReceiver",
+      "vault",
+    ];
+
+    if (addressFields.some((field) => deployment[field] !== undefined && !validAddress(deployment[field]))) {
+      return null;
+    }
+
+    const fullDeployment =
+      validAddress(deployment.policyEngine) &&
+      validAddress(deployment.auditLog) &&
+      validAddress(deployment.yieldRouter) &&
+      validAddress(deployment.vaultFactory) &&
+      validAddress(deployment.settler) &&
+      validAddress(deployment.cctpReceiver);
+
+    if (fullDeployment && deployment.deployedAt) {
+      return {
+        ...deployment,
+        factoryPermission: deployment.factoryPermission ?? true,
+        settlerPermission: deployment.settlerPermission ?? true,
+      };
     }
 
     return deployment;

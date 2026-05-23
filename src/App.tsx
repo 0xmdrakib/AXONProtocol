@@ -28,6 +28,7 @@ import {
   parseUnits,
   stringToBytes,
   type Address,
+  type Abi,
   type EIP1193Provider,
   type Hex,
   zeroAddress,
@@ -76,8 +77,14 @@ type DeployStep =
   | "VaultFactory"
   | "Settler"
   | "CCTPReceiver"
-  | "Permissions"
+  | "FactoryPermission"
+  | "SettlerPermission"
   | "Saved";
+type DeployAction = {
+  step: DeployStep;
+  label: string;
+  description: string;
+};
 
 type Tab = "connect" | "deploy" | "vault" | "services" | "payments" | "audit";
 type ServiceId = "market-data" | "inference" | "dataset" | "agent-task" | "monitoring";
@@ -105,6 +112,53 @@ const arcAddChainParams = {
   nativeCurrency: arcTestnet.nativeCurrency,
   rpcUrls: [...arcTestnet.rpcUrls.default.http],
   blockExplorerUrls: arcTestnet.blockExplorers?.default.url ? [arcTestnet.blockExplorers.default.url] : undefined,
+};
+const deployActions: Record<DeployStep, DeployAction> = {
+  PolicyEngine: {
+    step: "PolicyEngine",
+    label: "Deploy Policy Engine",
+    description: "Creates the policy contract used by vaults for limits and whitelist checks.",
+  },
+  AuditLog: {
+    step: "AuditLog",
+    label: "Deploy Audit Log",
+    description: "Creates the on-chain payment event log owned by your wallet.",
+  },
+  YieldRouter: {
+    step: "YieldRouter",
+    label: "Deploy Yield Router",
+    description: "Creates the vault funding router for Arc testnet USDC.",
+  },
+  VaultFactory: {
+    step: "VaultFactory",
+    label: "Deploy Vault Factory",
+    description: "Creates the factory that can deploy policy-controlled agent vaults.",
+  },
+  Settler: {
+    step: "Settler",
+    label: "Deploy Settler",
+    description: "Creates escrow-style settlement for agent-to-agent payments.",
+  },
+  CCTPReceiver: {
+    step: "CCTPReceiver",
+    label: "Deploy CCTP Receiver",
+    description: "Creates the placeholder receiver for future cross-chain funding.",
+  },
+  FactoryPermission: {
+    step: "FactoryPermission",
+    label: "Allow Factory Writer",
+    description: "Authorizes the vault factory to write payment audit events.",
+  },
+  SettlerPermission: {
+    step: "SettlerPermission",
+    label: "Allow Settler Writer",
+    description: "Authorizes the settler to write payment audit events.",
+  },
+  Saved: {
+    step: "Saved",
+    label: "Deployment Ready",
+    description: "All contracts and permissions are ready for vault creation.",
+  },
 };
 const servicePresets: ServicePreset[] = [
   {
@@ -201,6 +255,18 @@ function friendlyError(cause: unknown, fallback: string) {
 
   if (!cleaned) return fallback;
   return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+}
+
+function getNextDeployStep(deployment: DeploymentFile | null): DeployStep | null {
+  if (!deployment?.policyEngine) return "PolicyEngine";
+  if (!deployment.auditLog) return "AuditLog";
+  if (!deployment.yieldRouter) return "YieldRouter";
+  if (!deployment.vaultFactory) return "VaultFactory";
+  if (!deployment.settler) return "Settler";
+  if (!deployment.cctpReceiver) return "CCTPReceiver";
+  if (!deployment.factoryPermission) return "FactoryPermission";
+  if (!deployment.settlerPermission) return "SettlerPermission";
+  return null;
 }
 
 function walletConnectorIconUrl(connector: Connector) {
@@ -344,6 +410,8 @@ function App() {
   const auditLogAddress = resolveAddress(deployment?.auditLog);
   const usdcAddress = resolveAddress(deployment?.usdc || configuredUsdc);
   const activeNetwork = deployment?.network || arcTestnet.name;
+  const nextDeployStep = getNextDeployStep(deployment);
+  const nextDeployAction = nextDeployStep ? deployActions[nextDeployStep] : null;
 
   const selectedVault = isAddress(vaultAddress) ? getAddress(vaultAddress) : undefined;
   const agentId = useMemo(() => keccak256(stringToBytes(agentName || "agent")), [agentName]);
@@ -457,13 +525,24 @@ function App() {
     }
   }
 
-  async function deployAndWait(
-    step: DeployStep,
-    contract: { abi: readonly unknown[]; bytecode: Hex },
-    args?: readonly unknown[],
-  ) {
+  function baseDeployment(): DeploymentFile {
+    return {
+      network: arcTestnet.name,
+      chainId: arcTestnet.id,
+      deployer: normalizedAddress,
+      usdc: usdcAddress,
+      source: "browser-wallet",
+    };
+  }
+
+  function saveDeploymentProgress(nextDeployment: DeploymentFile) {
+    if (!normalizedAddress) return;
+    saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id);
+    setDeployment(nextDeployment);
+  }
+
+  async function deployAndWait(contract: { abi: Abi; bytecode: Hex }, args?: readonly unknown[]) {
     if (!publicClient) throw new Error("Arc RPC is not ready.");
-    setDeployStep(step);
     const hash = await deployContractAsync({
       abi: contract.abi,
       bytecode: contract.bytecode,
@@ -472,24 +551,24 @@ function App() {
     });
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (!receipt.contractAddress) {
-      throw new Error(`${step} deployment did not return a contract address.`);
+      throw new Error("Deployment did not return a contract address.");
     }
     return getAddress(receipt.contractAddress);
   }
 
-  async function writeAndWait(step: DeployStep, params: Parameters<typeof writeContractAsync>[0]) {
+  async function writeAndWait(params: Parameters<typeof writeContractAsync>[0]) {
     if (!publicClient) throw new Error("Arc RPC is not ready.");
-    setDeployStep(step);
     const hash = await writeContractAsync({ ...params, chainId: arcTestnet.id });
     await publicClient.waitForTransactionReceipt({ hash });
   }
 
-  async function deployProtocol() {
-    if (!normalizedAddress) return;
+  async function runDeployStep() {
+    if (!normalizedAddress || !nextDeployStep) return;
     setError("");
 
     try {
       await ensureArc();
+      setDeployStep(nextDeployStep);
       const {
         auditLogArtifact,
         cCTPReceiverArtifact,
@@ -498,54 +577,90 @@ function App() {
         vaultFactoryArtifact,
         yieldRouterArtifact,
       } = await import("./abi/protocolArtifacts");
+      const currentDeployment = deployment ?? baseDeployment();
 
-      const policyEngine = await deployAndWait("PolicyEngine", policyEngineArtifact);
-      const auditLog = await deployAndWait("AuditLog", auditLogArtifact, [normalizedAddress]);
-      const yieldRouter = await deployAndWait("YieldRouter", yieldRouterArtifact, [usdcAddress, normalizedAddress]);
-      const vaultFactory = await deployAndWait("VaultFactory", vaultFactoryArtifact, [
-        usdcAddress,
-        policyEngine,
-        yieldRouter,
-        auditLog,
-        normalizedAddress,
-      ]);
-      const settler = await deployAndWait("Settler", settlerArtifact, [usdcAddress, auditLog, normalizedAddress]);
-      const cctpReceiver = await deployAndWait("CCTPReceiver", cCTPReceiverArtifact, [usdcAddress, normalizedAddress]);
+      if (nextDeployStep === "PolicyEngine") {
+        const policyEngine = await deployAndWait(policyEngineArtifact);
+        saveDeploymentProgress({ ...currentDeployment, policyEngine });
+        return;
+      }
 
-      await writeAndWait("Permissions", {
-        address: auditLog,
-        abi: auditLogArtifact.abi,
-        functionName: "setFactory",
-        args: [vaultFactory, true],
-      });
-      await writeAndWait("Permissions", {
-        address: auditLog,
-        abi: auditLogArtifact.abi,
-        functionName: "setWriter",
-        args: [settler, true],
-      });
+      if (nextDeployStep === "AuditLog") {
+        const auditLog = await deployAndWait(auditLogArtifact, [normalizedAddress]);
+        saveDeploymentProgress({ ...currentDeployment, auditLog });
+        return;
+      }
 
-      const nextDeployment: DeploymentFile = {
-        network: arcTestnet.name,
-        chainId: arcTestnet.id,
-        deployer: normalizedAddress,
-        usdc: usdcAddress,
-        policyEngine,
-        auditLog,
-        yieldRouter,
-        vaultFactory,
-        settler,
-        cctpReceiver,
-        source: "browser-wallet",
-        deployedAt: new Date().toISOString(),
-      };
+      if (nextDeployStep === "YieldRouter") {
+        const yieldRouter = await deployAndWait(yieldRouterArtifact, [usdcAddress, normalizedAddress]);
+        saveDeploymentProgress({ ...currentDeployment, yieldRouter });
+        return;
+      }
 
-      saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id);
-      setDeployment(nextDeployment);
-      setDeployStep("Saved");
-      setTab("vault");
+      if (nextDeployStep === "VaultFactory") {
+        if (!currentDeployment.policyEngine || !currentDeployment.yieldRouter || !currentDeployment.auditLog) {
+          throw new Error("Finish earlier deployment steps first.");
+        }
+
+        const vaultFactory = await deployAndWait(vaultFactoryArtifact, [
+          usdcAddress,
+          currentDeployment.policyEngine,
+          currentDeployment.yieldRouter,
+          currentDeployment.auditLog,
+          normalizedAddress,
+        ]);
+        saveDeploymentProgress({ ...currentDeployment, vaultFactory });
+        return;
+      }
+
+      if (nextDeployStep === "Settler") {
+        if (!currentDeployment.auditLog) throw new Error("Deploy Audit Log first.");
+        const settler = await deployAndWait(settlerArtifact, [usdcAddress, currentDeployment.auditLog, normalizedAddress]);
+        saveDeploymentProgress({ ...currentDeployment, settler });
+        return;
+      }
+
+      if (nextDeployStep === "CCTPReceiver") {
+        const cctpReceiver = await deployAndWait(cCTPReceiverArtifact, [usdcAddress, normalizedAddress]);
+        saveDeploymentProgress({ ...currentDeployment, cctpReceiver });
+        return;
+      }
+
+      if (nextDeployStep === "FactoryPermission") {
+        if (!currentDeployment.auditLog || !currentDeployment.vaultFactory) {
+          throw new Error("Deploy Audit Log and Vault Factory first.");
+        }
+
+        await writeAndWait({
+          address: currentDeployment.auditLog,
+          abi: auditLogArtifact.abi,
+          functionName: "setFactory",
+          args: [currentDeployment.vaultFactory, true],
+        });
+        saveDeploymentProgress({ ...currentDeployment, factoryPermission: true });
+        return;
+      }
+
+      if (nextDeployStep === "SettlerPermission") {
+        if (!currentDeployment.auditLog || !currentDeployment.settler) {
+          throw new Error("Deploy Audit Log and Settler first.");
+        }
+
+        await writeAndWait({
+          address: currentDeployment.auditLog,
+          abi: auditLogArtifact.abi,
+          functionName: "setWriter",
+          args: [currentDeployment.settler, true],
+        });
+        saveDeploymentProgress({
+          ...currentDeployment,
+          settlerPermission: true,
+          deployedAt: currentDeployment.deployedAt ?? new Date().toISOString(),
+        });
+        setDeployStep("Saved");
+      }
     } catch (cause) {
-      setError(friendlyError(cause, "Deployment failed."));
+      setError(friendlyError(cause, "Deployment step failed."));
     }
   }
 
@@ -764,6 +879,7 @@ function App() {
   }
 
   const configured = Boolean(deployment && isOwner && factoryAddress !== zeroAddress && usdcAddress !== zeroAddress);
+  const deploymentReady = configured && !nextDeployStep;
   const canPayFromWallet =
     Boolean(normalizedAddress && vaultAgent) && getAddress(vaultAgent!) === normalizedAddress;
   const walletConnectReady = connectors.some(isWalletConnect);
@@ -831,10 +947,10 @@ function App() {
               <span className={onArc ? "statusChip ready" : "statusChip"}>
                 {onArc ? "Arc selected" : "Switch to Arc"}
               </span>
-              <span className={configured ? "statusChip ready" : "statusChip"}>
-                {configured ? "Deployment ready" : "Deploy from wallet"}
+              <span className={deploymentReady ? "statusChip ready" : "statusChip"}>
+                {deploymentReady ? "Deployment ready" : "Deploy from wallet"}
               </span>
-              {configured && <span>Factory {shortAddress(factoryAddress)}</span>}
+              {deploymentReady && <span>Factory {shortAddress(factoryAddress)}</span>}
             </div>
           </div>
           <button className="iconButton" onClick={() => Promise.all([refetchBalance(), refetchSpent(), refetchWalletUsdc()])}>
@@ -945,7 +1061,28 @@ function App() {
               </div>
             </div>
 
-            {configured ? (
+            <div className="faucetCallout">
+              <div>
+                <span>Need Arc testnet USDC?</span>
+                <strong>Claim from Circle first so every deploy transaction has gas.</strong>
+              </div>
+              <a className="faucetButton" href={circleFaucetUrl} target="_blank" rel="noreferrer">
+                <CircleDollarSign size={17} />
+                Circle Faucet
+              </a>
+            </div>
+
+            {!deploymentReady && nextDeployAction && (
+              <div className="deployNext">
+                <div>
+                  <span>Next transaction</span>
+                  <strong>{nextDeployAction.label}</strong>
+                  <p>{nextDeployAction.description}</p>
+                </div>
+              </div>
+            )}
+
+            {deploymentReady ? (
               <div className="deploymentActions">
                 <button onClick={() => setTab("vault")}>
                   <CheckCircle2 size={18} />
@@ -956,9 +1093,9 @@ function App() {
                 </button>
               </div>
             ) : (
-              <button disabled={!walletConnected || !onArc || busy} onClick={deployProtocol}>
+              <button disabled={!walletConnected || !onArc || busy || !nextDeployAction} onClick={runDeployStep}>
                 <PlugZap size={18} />
-                Deploy From Connected Wallet
+                {nextDeployAction?.label || "Deployment Ready"}
               </button>
             )}
           </section>

@@ -431,6 +431,33 @@ textarea:focus {
   gap: 10px;
 }
 
+.deployNext {
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+}
+
+.deployNext div {
+  display: grid;
+  gap: 5px;
+}
+
+.deployNext span {
+  color: #60706b;
+  font-size: 0.84rem;
+}
+
+.deployNext strong {
+  color: #17221f;
+}
+
+.deployNext p {
+  color: #52615d;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
 .serviceGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
