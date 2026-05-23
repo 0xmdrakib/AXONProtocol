@@ -98,6 +98,7 @@ type ServicePreset = {
 
 const configuredUsdc = (import.meta.env.VITE_USDC_ADDRESS || DEFAULT_USDC_ADDRESS) as Address;
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+const circleFaucetUrl = "https://faucet.circle.com";
 const arcAddChainParams = {
   chainId: numberToHex(arcTestnet.id),
   chainName: arcTestnet.name,
@@ -177,12 +178,29 @@ function isWalletConnect(connector: Connector) {
 
 function isUserRejectedRequest(error: unknown) {
   if (!error || typeof error !== "object") return false;
-  const maybe = error as { code?: number; message?: string; cause?: unknown };
+  const maybe = error as { code?: number; message?: string; cause?: unknown; details?: string };
+  const text = [maybe.message, maybe.details].filter(Boolean).join(" ");
+
   if (maybe.code === 4001) return true;
-  if (typeof maybe.message === "string" && /user rejected|request rejected|rejected the request|user denied/i.test(maybe.message)) {
+  if (/user rejected|request rejected|rejected the request|user denied|denied transaction signature/i.test(text)) {
     return true;
   }
+
   return isUserRejectedRequest(maybe.cause);
+}
+
+function friendlyError(cause: unknown, fallback: string) {
+  if (isUserRejectedRequest(cause)) return "Wallet request cancelled.";
+  if (!(cause instanceof Error)) return fallback;
+
+  const cleaned = cause.message
+    .replace(/\s+(Request Arguments|Details|Version):.*$/i, "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find((line) => line && !/^(request arguments|details|version):/i.test(line));
+
+  if (!cleaned) return fallback;
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
 }
 
 function walletConnectorIconUrl(connector: Connector) {
@@ -435,8 +453,7 @@ function App() {
     try {
       await switchConnectedWalletToArc();
     } catch (cause) {
-      if (isUserRejectedRequest(cause)) return;
-      setError(cause instanceof Error ? cause.message : "Could not switch to Arc testnet.");
+      setError(friendlyError(cause, "Could not switch to Arc testnet."));
     }
   }
 
@@ -528,7 +545,7 @@ function App() {
       setDeployStep("Saved");
       setTab("vault");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Deployment failed.");
+      setError(friendlyError(cause, "Deployment failed."));
     }
   }
 
@@ -562,7 +579,7 @@ function App() {
         setVaultAddress(getAddress(vault));
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create vault.");
+      setError(friendlyError(cause, "Could not create vault."));
     }
   }
 
@@ -589,7 +606,7 @@ function App() {
       });
       await Promise.all([refetchBalance(), refetchWalletUsdc()]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not fund vault.");
+      setError(friendlyError(cause, "Could not fund vault."));
     }
   }
 
@@ -608,7 +625,7 @@ function App() {
       });
       await Promise.all([refetchBalance(), refetchSpent()]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not send payment.");
+      setError(friendlyError(cause, "Could not send payment."));
     }
   }
 
@@ -630,7 +647,7 @@ function App() {
       setPaymentAmount(service.amount);
       setMemo(service.memo);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not approve service receiver.");
+      setError(friendlyError(cause, "Could not approve service receiver."));
     }
   }
 
@@ -653,7 +670,7 @@ function App() {
       setMemo(service.memo);
       await Promise.all([refetchBalance(), refetchSpent()]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not pay service.");
+      setError(friendlyError(cause, "Could not pay service."));
     }
   }
 
@@ -671,7 +688,7 @@ function App() {
         chainId: arcTestnet.id,
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update vault state.");
+      setError(friendlyError(cause, "Could not update vault state."));
     }
   }
 
@@ -727,13 +744,11 @@ function App() {
           }
           setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
         } catch (switchCause) {
-          if (isUserRejectedRequest(switchCause)) return;
-          setError("Wallet connected. Use Switch/Add Arc before deployment or payments.");
+          setError(friendlyError(switchCause, "Wallet connected. Use Switch/Add Arc before deployment or payments."));
         }
       }
     } catch (cause) {
-      if (isUserRejectedRequest(cause)) return;
-      setError(cause instanceof Error ? cause.message : "Wallet connection failed.");
+      setError(friendlyError(cause, "Wallet connection failed."));
     }
   }
 
@@ -744,7 +759,7 @@ function App() {
     try {
       await disconnectAsync(currentConnector ? { connector: currentConnector } : undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Wallet disconnect failed.");
+      setError(friendlyError(cause, "Wallet disconnect failed."));
     }
   }
 
@@ -858,6 +873,17 @@ function App() {
                 </button>
               </div>
             )}
+
+            <div className="faucetCallout">
+              <div>
+                <span>Need Arc testnet USDC?</span>
+                <strong>Claim test tokens from Circle before deploying or funding a vault.</strong>
+              </div>
+              <a className="faucetButton" href={circleFaucetUrl} target="_blank" rel="noreferrer">
+                <CircleDollarSign size={17} />
+                Circle Faucet
+              </a>
+            </div>
 
             <div className="walletGrid">
               {connectors
