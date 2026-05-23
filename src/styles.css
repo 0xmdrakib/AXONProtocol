@@ -169,11 +169,11 @@ h4 {
 
 .navTab {
   width: 100%;
-  min-height: 38px;
+  min-height: 50px;
   justify-content: start;
   background: transparent;
   color: #cfe0db;
-  padding: 0 10px;
+  padding: 8px 10px;
 }
 
 .navTab:hover:not(:disabled),
@@ -181,6 +181,27 @@ h4 {
   background: rgba(237, 247, 243, 0.12);
   color: #ffffff;
   transform: none;
+}
+
+.navTab > span {
+  display: grid;
+  gap: 2px;
+}
+
+.navTab strong {
+  font-size: 0.94rem;
+  line-height: 1.1;
+}
+
+.navTab small {
+  color: #9fb7b1;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.navTab.active small {
+  color: #cfe0db;
 }
 
 .stat {
@@ -254,7 +275,20 @@ h4 {
 }
 
 .panel.wide {
-  max-width: 920px;
+  max-width: 1040px;
+}
+
+.panelHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.panelHeader p,
+.muted {
+  max-width: 720px;
+  color: #52615d;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .panelTitle {
@@ -369,6 +403,11 @@ textarea:focus {
   flex: 0 0 auto;
 }
 
+.faucetButton.compact {
+  min-height: 42px;
+  padding: 0 14px;
+}
+
 .walletGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -456,6 +495,74 @@ textarea:focus {
   color: #52615d;
   font-size: 0.88rem;
   line-height: 1.4;
+}
+
+.vaultPanel,
+.servicesPanel {
+  gap: 18px;
+}
+
+.flowStrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.flowStep {
+  min-height: 46px;
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: #60706b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.flowStep svg {
+  color: #9aacaa;
+  flex: 0 0 auto;
+}
+
+.flowStep.ready {
+  border-color: #bfe0d5;
+  background: #eef8f4;
+  color: #0e6a5e;
+}
+
+.flowStep.ready svg {
+  color: #0e6a5e;
+}
+
+.vaultSections {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.subPanel,
+.quickPay {
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+  display: grid;
+  gap: 13px;
+}
+
+.quickPay {
+  background: #f7faf8;
+}
+
+.stepLabel {
+  color: #0e6a5e;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .serviceGrid {
@@ -578,7 +685,9 @@ textarea:focus {
   .split,
   .actions,
   .serviceActions,
-  .deploymentGrid {
+  .deploymentGrid,
+  .flowStrip,
+  .vaultSections {
     grid-template-columns: 1fr;
   }
 

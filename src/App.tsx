@@ -1,6 +1,5 @@
 import {
   Activity,
-  Banknote,
   Bot,
   CheckCircle2,
   CircleDollarSign,
@@ -17,6 +16,7 @@ import {
   Wallet,
   WalletCards,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -86,7 +86,7 @@ type DeployAction = {
   description: string;
 };
 
-type Tab = "connect" | "deploy" | "vault" | "services" | "payments" | "audit";
+type Tab = "connect" | "deploy" | "vault" | "services" | "audit";
 type ServiceId = "market-data" | "inference" | "dataset" | "agent-task" | "monitoring";
 type ConnectedWalletSession = {
   address: Address;
@@ -100,7 +100,7 @@ type ServicePreset = {
   amount: string;
   memo: string;
   description: string;
-  Icon: typeof Banknote;
+  Icon: LucideIcon;
 };
 
 const configuredUsdc = (import.meta.env.VITE_USDC_ADDRESS || DEFAULT_USDC_ADDRESS) as Address;
@@ -207,6 +207,13 @@ const servicePresets: ServicePreset[] = [
     Icon: Server,
   },
 ];
+const navItems = [
+  { id: "connect", Icon: WalletCards, label: "Connect", detail: "Wallet + Arc" },
+  { id: "deploy", Icon: PlugZap, label: "Deploy", detail: "Protocol contracts" },
+  { id: "vault", Icon: Zap, label: "Vault", detail: "Create + fund" },
+  { id: "services", Icon: Receipt, label: "Services", detail: "Approve + pay" },
+  { id: "audit", Icon: TerminalSquare, label: "Audit", detail: "Payment proof" },
+] satisfies Array<{ id: Tab; Icon: LucideIcon; label: string; detail: string }>;
 
 function toUsdc(value: string) {
   return parseUnits(value || "0", 6);
@@ -705,19 +712,17 @@ function App() {
     try {
       await ensureArc();
       const amount = toUsdc(depositAmount);
-      await writeContractAsync({
+      await writeAndWait({
         address: usdcAddress,
         abi: erc20Abi,
         functionName: "approve",
         args: [selectedVault, amount],
-        chainId: arcTestnet.id,
       });
-      await writeContractAsync({
+      await writeAndWait({
         address: selectedVault,
         abi: agentVaultAbi,
         functionName: "deposit",
         args: [amount],
-        chainId: arcTestnet.id,
       });
       await Promise.all([refetchBalance(), refetchWalletUsdc()]);
     } catch (cause) {
@@ -731,12 +736,11 @@ function App() {
 
     try {
       await ensureArc();
-      await writeContractAsync({
+      await writeAndWait({
         address: selectedVault,
         abi: agentVaultAbi,
         functionName: "pay",
         args: [getAddress(recipient), toUsdc(paymentAmount), memo],
-        chainId: arcTestnet.id,
       });
       await Promise.all([refetchBalance(), refetchSpent()]);
     } catch (cause) {
@@ -751,12 +755,11 @@ function App() {
 
     try {
       await ensureArc();
-      await writeContractAsync({
+      await writeAndWait({
         address: selectedVault,
         abi: agentVaultAbi,
         functionName: "setRecipient",
         args: [getAddress(receiver), true],
-        chainId: arcTestnet.id,
       });
       setRecipient(getAddress(receiver));
       setPaymentAmount(service.amount);
@@ -773,12 +776,11 @@ function App() {
 
     try {
       await ensureArc();
-      await writeContractAsync({
+      await writeAndWait({
         address: selectedVault,
         abi: agentVaultAbi,
         functionName: "pay",
         args: [getAddress(receiver), toUsdc(service.amount), service.memo],
-        chainId: arcTestnet.id,
       });
       setRecipient(getAddress(receiver));
       setPaymentAmount(service.amount);
@@ -795,12 +797,11 @@ function App() {
 
     try {
       await ensureArc();
-      await writeContractAsync({
+      await writeAndWait({
         address: selectedVault,
         abi: agentVaultAbi,
         functionName: paused ? "pause" : "unpause",
         args: [],
-        chainId: arcTestnet.id,
       });
     } catch (cause) {
       setError(friendlyError(cause, "Could not update vault state."));
@@ -902,21 +903,17 @@ function App() {
         </button>
 
         <div className="navTabs" aria-label="Dashboard sections">
-          {[
-            ["connect", WalletCards, "Connect"],
-            ["deploy", PlugZap, "Deploy"],
-            ["vault", Zap, "Vault"],
-            ["services", Receipt, "Services"],
-            ["payments", Banknote, "Payments"],
-            ["audit", TerminalSquare, "Audit"],
-          ].map(([id, Icon, label]) => (
+          {navItems.map(({ id, Icon, label, detail }) => (
             <button
               className={tab === id ? "navTab active" : "navTab"}
-              key={id as string}
-              onClick={() => setTab(id as Tab)}
+              key={id}
+              onClick={() => setTab(id)}
             >
               <Icon size={17} />
-              <span>{label as string}</span>
+              <span>
+                <strong>{label}</strong>
+                <small>{detail}</small>
+              </span>
             </button>
           ))}
         </div>
@@ -1057,7 +1054,7 @@ function App() {
               </div>
               <div>
                 <span>Status</span>
-                <strong>{configured ? "Ready" : deployStep || "Not deployed"}</strong>
+                <strong>{deploymentReady ? "Ready" : deployStep || nextDeployStep || "Not deployed"}</strong>
               </div>
             </div>
 
@@ -1102,66 +1099,132 @@ function App() {
         )}
 
         {tab === "vault" && (
-          <div className="grid">
-            <section className="panel">
+          <section className="panel wide vaultPanel">
+            <div className="panelHeader">
               <div className="panelTitle">
-                <CircleDollarSign size={19} />
-                <h3>Create Agent Vault</h3>
+                <Zap size={19} />
+                <h3>Agent Vault</h3>
               </div>
-              <label>
-                Agent ID
-                <input value={agentName} onChange={(event) => setAgentName(event.target.value)} />
-              </label>
-              <label>
-                Agent wallet
-                <input value={agentAddress} onChange={(event) => setAgentAddress(event.target.value)} />
-              </label>
-              <div className="split">
-                <label>
-                  Daily limit
-                  <input value={dailyLimit} onChange={(event) => setDailyLimit(event.target.value)} />
-                </label>
-                <label>
-                  Per payment
-                  <input value={perTxLimit} onChange={(event) => setPerTxLimit(event.target.value)} />
-                </label>
-              </div>
-              <label>
-                Recipients
-                <textarea value={whitelist} onChange={(event) => setWhitelist(event.target.value)} />
-              </label>
-              <button disabled={!configured || busy || !isAddress(agentAddress)} onClick={createVault}>
-                <Zap size={18} />
-                Create Vault
-              </button>
-            </section>
+              <p>Deploy one policy vault, fund it with Arc testnet USDC, then let the agent pay only approved receivers.</p>
+            </div>
 
-            <section className="panel">
-              <div className="panelTitle">
-                <ShieldCheck size={19} />
-                <h3>Human Override</h3>
+            <div className="flowStrip" aria-label="Vault workflow">
+              <div className={deploymentReady ? "flowStep ready" : "flowStep"}>
+                <CheckCircle2 size={17} />
+                <span>Protocol deployed</span>
               </div>
-              <label>
-                Vault
-                <input value={vaultAddress} onChange={(event) => setVaultAddress(event.target.value)} />
-              </label>
-              <div className="actions">
-                <button disabled={!selectedVault || busy || !isOwner} onClick={() => setPaused(true)}>
-                  Pause
-                </button>
-                <button disabled={!selectedVault || busy || !isOwner} onClick={() => setPaused(false)}>
-                  Unpause
-                </button>
+              <div className={selectedVault ? "flowStep ready" : "flowStep"}>
+                <CheckCircle2 size={17} />
+                <span>Vault created</span>
               </div>
-            </section>
-          </div>
+              <div className={balance && balance > 0n ? "flowStep ready" : "flowStep"}>
+                <CheckCircle2 size={17} />
+                <span>Vault funded</span>
+              </div>
+            </div>
+
+            <div className="deploymentGrid">
+              <div>
+                <span>Selected vault</span>
+                <strong>{selectedVault ? shortAddress(selectedVault) : "Create a vault first"}</strong>
+              </div>
+              <div>
+                <span>Agent signer</span>
+                <strong>{vaultAgent ? shortAddress(vaultAgent) : isAddress(agentAddress) ? shortAddress(agentAddress) : "Not set"}</strong>
+              </div>
+              <div>
+                <span>Vault balance</span>
+                <strong>{balance === undefined ? "-" : `${formatUnits(balance, 6)} USDC`}</strong>
+              </div>
+              <div>
+                <span>Spend today</span>
+                <strong>{spent === undefined ? "-" : `${formatUnits(spent, 6)} USDC`}</strong>
+              </div>
+            </div>
+
+            <div className="vaultSections">
+              <section className="subPanel">
+                <div>
+                  <span className="stepLabel">Step 1</span>
+                  <h4>Create policy vault</h4>
+                  <p className="muted">Owner wallet creates the vault and sets the agent, limits, and optional starting whitelist.</p>
+                </div>
+                <label>
+                  Agent ID
+                  <input value={agentName} onChange={(event) => setAgentName(event.target.value)} />
+                </label>
+                <label>
+                  Agent wallet
+                  <input value={agentAddress} onChange={(event) => setAgentAddress(event.target.value)} />
+                </label>
+                <div className="split">
+                  <label>
+                    Daily limit
+                    <input value={dailyLimit} onChange={(event) => setDailyLimit(event.target.value)} />
+                  </label>
+                  <label>
+                    Per payment
+                    <input value={perTxLimit} onChange={(event) => setPerTxLimit(event.target.value)} />
+                  </label>
+                </div>
+                <label>
+                  Initial receivers
+                  <textarea
+                    value={whitelist}
+                    onChange={(event) => setWhitelist(event.target.value)}
+                    placeholder="Optional: paste receiver wallet addresses"
+                  />
+                </label>
+                <button disabled={!deploymentReady || busy || !isAddress(agentAddress)} onClick={createVault}>
+                  <Zap size={18} />
+                  Create Vault
+                </button>
+              </section>
+
+              <section className="subPanel">
+                <div>
+                  <span className="stepLabel">Step 2</span>
+                  <h4>Fund and control</h4>
+                  <p className="muted">Deposit testnet USDC into the selected vault. Only the owner can pause or unpause it.</p>
+                </div>
+                <label>
+                  Vault address
+                  <input value={vaultAddress} onChange={(event) => setVaultAddress(event.target.value)} />
+                </label>
+                <label>
+                  Deposit amount
+                  <input value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} />
+                </label>
+                <div className="actions">
+                  <button disabled={!selectedVault || busy || !isOwner} onClick={approveAndDeposit}>
+                    <CircleDollarSign size={18} />
+                    Fund Vault
+                  </button>
+                  <a className="faucetButton compact" href={circleFaucetUrl} target="_blank" rel="noreferrer">
+                    Faucet
+                  </a>
+                </div>
+                <div className="actions">
+                  <button className="secondaryButton" disabled={!selectedVault || busy || !isOwner} onClick={() => setPaused(true)}>
+                    Pause
+                  </button>
+                  <button className="secondaryButton" disabled={!selectedVault || busy || !isOwner} onClick={() => setPaused(false)}>
+                    Unpause
+                  </button>
+                </div>
+              </section>
+            </div>
+          </section>
         )}
 
         {tab === "services" && (
-          <section className="panel wide">
-            <div className="panelTitle">
-              <Receipt size={19} />
-              <h3>Use Case Simulator</h3>
+          <section className="panel wide servicesPanel">
+            <div className="panelHeader">
+              <div className="panelTitle">
+                <Receipt size={19} />
+                <h3>Service Payments</h3>
+              </div>
+              <p>Select a real receiver wallet, approve it once, then send an actual Arc testnet USDC payment from the agent vault.</p>
             </div>
 
             <div className="deploymentGrid">
@@ -1174,6 +1237,32 @@ function App() {
                 <strong>{vaultAgent ? shortAddress(vaultAgent) : "No vault agent"}</strong>
               </div>
             </div>
+
+            <section className="quickPay">
+              <div>
+                <span className="stepLabel">Manual payment</span>
+                <h4>Pay any approved receiver</h4>
+                <p className="muted">Use this when the service is not in the presets below.</p>
+              </div>
+              <div className="split">
+                <label>
+                  Recipient
+                  <input value={recipient} onChange={(event) => setRecipient(event.target.value)} />
+                </label>
+                <label>
+                  Amount
+                  <input value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
+                </label>
+              </div>
+              <label>
+                Memo
+                <input value={memo} onChange={(event) => setMemo(event.target.value)} />
+              </label>
+              <button disabled={!selectedVault || !isAddress(recipient) || busy || !canPayFromWallet} onClick={payRecipient}>
+                <Activity size={18} />
+                Send Payment
+              </button>
+            </section>
 
             <div className="serviceGrid">
               {servicePresets.map((service) => {
@@ -1222,62 +1311,19 @@ function App() {
                         onClick={() => allowServiceReceiver(service)}
                       >
                         <ShieldCheck size={17} />
-                        Allow Receiver
+                        Approve
                       </button>
                       <button
                         disabled={!selectedVault || !receiverReady || busy || !canPayFromWallet}
                         onClick={() => payService(service)}
                       >
                         <Activity size={17} />
-                        Pay Service
+                        Pay
                       </button>
                     </div>
                   </article>
                 );
               })}
-            </div>
-          </section>
-        )}
-
-        {tab === "payments" && (
-          <section className="panel wide">
-            <div className="panelTitle">
-              <Banknote size={19} />
-              <h3>Fund And Pay</h3>
-            </div>
-            <label>
-              Vault
-              <input value={vaultAddress} onChange={(event) => setVaultAddress(event.target.value)} />
-            </label>
-            <div className="split">
-              <label>
-                Deposit USDC
-                <input value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} />
-              </label>
-              <label>
-                Recipient
-                <input value={recipient} onChange={(event) => setRecipient(event.target.value)} />
-              </label>
-            </div>
-            <div className="split">
-              <label>
-                Amount
-                <input value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
-              </label>
-              <label>
-                Memo
-                <input value={memo} onChange={(event) => setMemo(event.target.value)} />
-              </label>
-            </div>
-            <div className="actions">
-              <button disabled={!selectedVault || busy || !isOwner} onClick={approveAndDeposit}>
-                <CircleDollarSign size={18} />
-                Fund Vault
-              </button>
-              <button disabled={!selectedVault || !isAddress(recipient) || busy || !canPayFromWallet} onClick={payRecipient}>
-                <Activity size={18} />
-                Send Payment
-              </button>
             </div>
           </section>
         )}
