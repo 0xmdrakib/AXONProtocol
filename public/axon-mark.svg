@@ -1,0 +1,24 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AXON Protocol mark</title>
+  <desc id="desc">A minimal square mark for AXON Protocol.</desc>
+  <defs>
+    <linearGradient id="axonDiagonalA" x1="76" y1="76" x2="180" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#23D0B6" />
+      <stop offset="1" stop-color="#17998A" />
+    </linearGradient>
+    <linearGradient id="axonDiagonalB" x1="180" y1="76" x2="76" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#69E5D1" />
+      <stop offset="1" stop-color="#2DC6B0" />
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="#12211F" />
+  <path d="M80 80L176 176" stroke="url(#axonDiagonalA)" stroke-width="18" stroke-linecap="round" />
+  <path d="M176 80L80 176" stroke="url(#axonDiagonalB)" stroke-width="18" stroke-linecap="round" />
+  <path d="M62 78C80 57 103 46 128 46C153 46 176 57 194 78" stroke="#66E0CC" stroke-width="7" stroke-linecap="round" />
+  <circle cx="80" cy="80" r="10" fill="#E8FFF9" />
+  <circle cx="176" cy="80" r="10" fill="#E8FFF9" />
+  <circle cx="80" cy="176" r="10" fill="#E8FFF9" />
+  <circle cx="176" cy="176" r="10" fill="#E8FFF9" />
+  <circle cx="128" cy="128" r="12" fill="#F8FFFE" />
+  <circle cx="128" cy="128" r="20" fill="#F8FFFE" fill-opacity="0.08" />
+</svg>
