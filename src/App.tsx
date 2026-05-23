@@ -161,6 +161,21 @@ function isWalletConnect(connector: Connector) {
   return connector.type === "walletConnect" || connector.id.toLowerCase().includes("walletconnect");
 }
 
+function isUserRejectedRequest(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const maybe = error as { code?: number; message?: string; cause?: unknown };
+  if (maybe.code === 4001 || maybe.code === 1000) return true;
+  if (typeof maybe.message === "string" && /user rejected|request rejected|rejected the request/i.test(maybe.message)) {
+    return true;
+  }
+  return isUserRejectedRequest(maybe.cause);
+}
+
+function walletButtonIcon(connector: Connector) {
+  if (isWalletConnect(connector)) return "/walletconnect.svg";
+  return connector.icon || "";
+}
+
 function App() {
   const publicClient = usePublicClient();
   const chainId = useChainId();
@@ -538,6 +553,17 @@ function App() {
     setTab("deploy");
   }
 
+  async function connectWallet(connector: Connector) {
+    setError("");
+
+    try {
+      await connectAsync({ connector, chainId: arcTestnet.id });
+    } catch (cause) {
+      if (isUserRejectedRequest(cause)) return;
+      setError(cause instanceof Error ? cause.message : "Wallet connection failed.");
+    }
+  }
+
   const configured = Boolean(deployment && isOwner && factoryAddress !== zeroAddress && usdcAddress !== zeroAddress);
   const canPayFromWallet =
     Boolean(normalizedAddress && vaultAgent) && getAddress(vaultAgent!) === normalizedAddress;
@@ -650,19 +676,29 @@ function App() {
             )}
 
             <div className="walletGrid">
-              {connectors.map((connector) => (
-                <button
-                  className="walletOption"
-                  key={connector.uid}
-                  disabled={isConnecting}
-                  onClick={() => connectAsync({ connector, chainId: arcTestnet.id }).catch((cause) => {
-                    setError(cause instanceof Error ? cause.message : "Wallet connection failed.");
-                  })}
-                >
-                  {isWalletConnect(connector) ? <Plug size={18} /> : <Wallet size={18} />}
-                  <span>{connectorLabel(connector)}</span>
-                </button>
-              ))}
+              {connectors
+                .filter((connector) => connector.type !== "injected" || connector.name !== "Injected")
+                .map((connector) => {
+                  const icon = walletButtonIcon(connector);
+
+                  return (
+                    <button
+                      className="walletOption"
+                      key={connector.uid}
+                      disabled={isConnecting}
+                      onClick={() => connectWallet(connector)}
+                    >
+                      <span className="walletIcon" aria-hidden="true">
+                        {icon ? (
+                          <img src={icon} alt="" />
+                        ) : (
+                          <Wallet size={16} />
+                        )}
+                      </span>
+                      <span>{connectorLabel(connector)}</span>
+                    </button>
+                  );
+                })}
             </div>
 
             {walletConnectMissing && (

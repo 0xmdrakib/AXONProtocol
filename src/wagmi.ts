@@ -1,13 +1,13 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createConfig, http } from "wagmi";
-import { injected, walletConnect } from "wagmi/connectors";
+import { walletConnect } from "wagmi/connectors";
 
 import { arcTestnet } from "./config/chains";
 
 export const queryClient = new QueryClient();
 
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
-const connectors = [injected()];
+const connectors = [];
 
 if (walletConnectProjectId) {
   connectors.push(

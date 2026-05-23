@@ -352,6 +352,25 @@ textarea:focus {
   background: #f1f8f5;
 }
 
+.walletIcon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #f1f6f4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1d3430;
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.walletIcon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .deploymentGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

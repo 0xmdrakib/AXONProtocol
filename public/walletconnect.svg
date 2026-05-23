@@ -1,0 +1,7 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">WalletConnect</title>
+  <desc id="desc">WalletConnect icon.</desc>
+  <rect width="64" height="64" rx="18" fill="#3B99FC" />
+  <path d="M19.6 26.2C26.5 19.5 37.5 19.5 44.4 26.2L46 27.8C46.7 28.5 46.7 29.6 46 30.2L40.5 35.5C40.1 35.9 39.4 35.9 39 35.5L36.8 33.4C34.2 30.9 29.9 30.9 27.2 33.4L24.9 35.6C24.5 36 23.9 36 23.5 35.6L18 30.2C17.3 29.6 17.3 28.5 18 27.8L19.6 26.2Z" fill="white" />
+  <path d="M28.6 37.2C30.5 35.3 33.5 35.3 35.4 37.2L37.1 38.8C37.6 39.3 37.6 40.1 37.1 40.6L33.1 44.5C32.5 45.1 31.5 45.1 30.9 44.5L26.9 40.6C26.4 40.1 26.4 39.3 26.9 38.8L28.6 37.2Z" fill="white" />
+</svg>
