@@ -361,17 +361,30 @@ function App() {
     }
 
     if (walletChainId !== arcTestnet.id) {
-      await switchChainAsync({ chainId: arcTestnet.id });
-      setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
+      await switchConnectedWalletToArc();
     }
+  }
+
+  async function switchConnectedWalletToArc() {
+    if (!currentConnector) {
+      throw new Error("Connect a wallet first.");
+    }
+
+    if (currentConnector.switchChain) {
+      await currentConnector.switchChain({ chainId: arcTestnet.id });
+      setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
+      return;
+    }
+
+    await switchChainAsync({ chainId: arcTestnet.id, connector: currentConnector });
+    setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
   }
 
   async function requestArcNetwork() {
     setError("");
 
     try {
-      await switchChainAsync({ chainId: arcTestnet.id });
-      setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
+      await switchConnectedWalletToArc();
     } catch (cause) {
       if (isUserRejectedRequest(cause)) return;
       setError(cause instanceof Error ? cause.message : "Could not switch to Arc testnet.");
@@ -637,7 +650,11 @@ function App() {
 
       if (result.chainId !== arcTestnet.id) {
         try {
-          await switchChainAsync({ chainId: arcTestnet.id });
+          if (connector.switchChain) {
+            await connector.switchChain({ chainId: arcTestnet.id });
+          } else {
+            await switchChainAsync({ chainId: arcTestnet.id, connector });
+          }
           setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
         } catch (switchCause) {
           if (isUserRejectedRequest(switchCause)) return;
