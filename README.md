@@ -4,6 +4,8 @@
 
 AXON gives an AI agent a controlled USDC vault. The agent can pay approved receivers, while the human owner keeps limits, audit visibility, and emergency control.
 
+**Live app:** https://axon-protocol-arc.vercel.app
+
 ## Core Use Case
 
 AI agents need to pay for APIs, compute, data, tools, and other agents. AXON lets the owner fund a vault once, then the agent can send USDC only within policy.
