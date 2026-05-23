@@ -24,9 +24,11 @@ import {
   getAddress,
   isAddress,
   keccak256,
+  numberToHex,
   parseUnits,
   stringToBytes,
   type Address,
+  type EIP1193Provider,
   type Hex,
   zeroAddress,
 } from "viem";
@@ -96,6 +98,13 @@ type ServicePreset = {
 
 const configuredUsdc = (import.meta.env.VITE_USDC_ADDRESS || DEFAULT_USDC_ADDRESS) as Address;
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+const arcAddChainParams = {
+  chainId: numberToHex(arcTestnet.id),
+  chainName: arcTestnet.name,
+  nativeCurrency: arcTestnet.nativeCurrency,
+  rpcUrls: [...arcTestnet.rpcUrls.default.http],
+  blockExplorerUrls: arcTestnet.blockExplorers?.default.url ? [arcTestnet.blockExplorers.default.url] : undefined,
+};
 const servicePresets: ServicePreset[] = [
   {
     id: "market-data",
@@ -169,8 +178,8 @@ function isWalletConnect(connector: Connector) {
 function isUserRejectedRequest(error: unknown) {
   if (!error || typeof error !== "object") return false;
   const maybe = error as { code?: number; message?: string; cause?: unknown };
-  if (maybe.code === 4001 || maybe.code === 1000) return true;
-  if (typeof maybe.message === "string" && /user rejected|request rejected|rejected the request/i.test(maybe.message)) {
+  if (maybe.code === 4001) return true;
+  if (typeof maybe.message === "string" && /user rejected|request rejected|rejected the request|user denied/i.test(maybe.message)) {
     return true;
   }
   return isUserRejectedRequest(maybe.cause);
@@ -194,6 +203,26 @@ function WalletConnectMark() {
       />
     </svg>
   );
+}
+
+async function switchProviderToArc(provider: EIP1193Provider) {
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: arcAddChainParams.chainId }],
+    });
+  } catch (cause) {
+    if (isUserRejectedRequest(cause)) throw cause;
+
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [arcAddChainParams],
+    });
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: arcAddChainParams.chainId }],
+    });
+  }
 }
 
 function App() {
@@ -370,13 +399,33 @@ function App() {
       throw new Error("Connect a wallet first.");
     }
 
-    if (currentConnector.switchChain) {
-      await currentConnector.switchChain({ chainId: arcTestnet.id });
-      setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
-      return;
+    const provider = await currentConnector.getProvider().catch(() => undefined);
+
+    if (provider) {
+      await switchProviderToArc(provider as EIP1193Provider);
+    } else if (currentConnector.switchChain) {
+      await currentConnector.switchChain({
+        addEthereumChainParameter: {
+          blockExplorerUrls: arcAddChainParams.blockExplorerUrls,
+          chainName: arcAddChainParams.chainName,
+          nativeCurrency: arcAddChainParams.nativeCurrency,
+          rpcUrls: arcAddChainParams.rpcUrls,
+        },
+        chainId: arcTestnet.id,
+      });
+    } else {
+      await switchChainAsync({
+        addEthereumChainParameter: {
+          blockExplorerUrls: arcAddChainParams.blockExplorerUrls,
+          chainName: arcAddChainParams.chainName,
+          nativeCurrency: arcAddChainParams.nativeCurrency,
+          rpcUrls: arcAddChainParams.rpcUrls,
+        },
+        chainId: arcTestnet.id,
+        connector: currentConnector,
+      });
     }
 
-    await switchChainAsync({ chainId: arcTestnet.id, connector: currentConnector });
     setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
   }
 
@@ -650,10 +699,31 @@ function App() {
 
       if (result.chainId !== arcTestnet.id) {
         try {
-          if (connector.switchChain) {
-            await connector.switchChain({ chainId: arcTestnet.id });
+          const provider = await connector.getProvider().catch(() => undefined);
+
+          if (provider) {
+            await switchProviderToArc(provider as EIP1193Provider);
+          } else if (connector.switchChain) {
+            await connector.switchChain({
+              addEthereumChainParameter: {
+                blockExplorerUrls: arcAddChainParams.blockExplorerUrls,
+                chainName: arcAddChainParams.chainName,
+                nativeCurrency: arcAddChainParams.nativeCurrency,
+                rpcUrls: arcAddChainParams.rpcUrls,
+              },
+              chainId: arcTestnet.id,
+            });
           } else {
-            await switchChainAsync({ chainId: arcTestnet.id, connector });
+            await switchChainAsync({
+              addEthereumChainParameter: {
+                blockExplorerUrls: arcAddChainParams.blockExplorerUrls,
+                chainName: arcAddChainParams.chainName,
+                nativeCurrency: arcAddChainParams.nativeCurrency,
+                rpcUrls: arcAddChainParams.rpcUrls,
+              },
+              chainId: arcTestnet.id,
+              connector,
+            });
           }
           setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
         } catch (switchCause) {
