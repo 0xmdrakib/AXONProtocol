@@ -111,23 +111,4 @@ VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
 - Cross-chain funding with future CCTP support
 - Idle fund routing with future USYC support
 
-## Project Structure
 
-```text
-contracts/   AXON protocol contracts
-src/         React dashboard and wallet deploy flow
-test/        Hardhat protocol tests
-```
-
-## Test And Build
-
-```bash
-npm test
-npm run build
-```
-
-## Status
-
-Ready for Arc testnet demo and hackathon team testing.
-
-Not for mainnet funds yet. Before mainnet, AXON needs an audit, multisig ownership, monitoring, launch limits, production CCTP verification, and a real USYC adapter.
