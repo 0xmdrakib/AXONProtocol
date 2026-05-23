@@ -34,6 +34,7 @@ import {
   useAccount,
   useConnect,
   useDisconnect,
+  useConnections,
   useDeployContract,
   usePublicClient,
   useReadContract,
@@ -78,6 +79,11 @@ type DeployStep =
 
 type Tab = "connect" | "deploy" | "vault" | "services" | "payments" | "audit";
 type ServiceId = "market-data" | "inference" | "dataset" | "agent-task" | "monitoring";
+type ConnectedWalletSession = {
+  address: Address;
+  chainId: number;
+  connector: Connector;
+};
 type ServicePreset = {
   id: ServiceId;
   title: string;
@@ -192,10 +198,11 @@ function WalletConnectMark() {
 
 function App() {
   const publicClient = usePublicClient();
-  const chainId = useChainId();
-  const { address, isConnected, connector: activeConnector } = useAccount();
+  const configuredChainId = useChainId();
+  const { address, isConnected, chainId: accountChainId, connector: activeConnector } = useAccount();
+  const connections = useConnections();
   const { connectors, connectAsync, isPending: isConnecting } = useConnect();
-  const { disconnect } = useDisconnect();
+  const { disconnectAsync } = useDisconnect();
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const { deployContractAsync, isPending: isDeployTxPending } = useDeployContract();
   const { writeContractAsync, isPending: isWritePending } = useWriteContract();
@@ -221,10 +228,18 @@ function App() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [deployment, setDeployment] = useState<DeploymentFile | null>(null);
   const [deployStep, setDeployStep] = useState<DeployStep | null>(null);
+  const [walletSession, setWalletSession] = useState<ConnectedWalletSession | null>(null);
   const [error, setError] = useState("");
 
-  const onArc = chainId === arcTestnet.id;
-  const normalizedAddress = address ? getAddress(address) : undefined;
+  const selectedConnection =
+    connections.find((connection) => connection.connector.uid === walletSession?.connector.uid) ?? connections[0];
+  const wagmiAddress = address ? getAddress(address) : undefined;
+  const connectionAddress = selectedConnection?.accounts[0] ? getAddress(selectedConnection.accounts[0]) : undefined;
+  const normalizedAddress = wagmiAddress ?? connectionAddress ?? walletSession?.address;
+  const currentConnector = activeConnector ?? selectedConnection?.connector ?? walletSession?.connector;
+  const walletChainId = accountChainId ?? selectedConnection?.chainId ?? walletSession?.chainId ?? configuredChainId;
+  const walletConnected = isConnected || Boolean(connectionAddress || walletSession?.address);
+  const onArc = walletChainId === arcTestnet.id;
   const isOwner =
     Boolean(normalizedAddress && deployment?.deployer) &&
     getAddress(deployment!.deployer!) === normalizedAddress;
@@ -238,6 +253,33 @@ function App() {
 
     setDeployment(loadStoredDeployment(normalizedAddress, arcTestnet.id));
   }, [normalizedAddress]);
+
+  useEffect(() => {
+    if (wagmiAddress && activeConnector) {
+      setWalletSession((current) => {
+        const nextSession = {
+          address: wagmiAddress,
+          chainId: accountChainId ?? current?.chainId ?? configuredChainId,
+          connector: activeConnector,
+        };
+
+        if (
+          current?.address === nextSession.address &&
+          current.chainId === nextSession.chainId &&
+          current.connector.uid === nextSession.connector.uid
+        ) {
+          return current;
+        }
+
+        return nextSession;
+      });
+      return;
+    }
+
+    if (!isConnected && connections.length === 0) {
+      setWalletSession(null);
+    }
+  }, [accountChainId, activeConnector, configuredChainId, connections.length, isConnected, wagmiAddress]);
 
   useEffect(() => {
     if (normalizedAddress && !agentAddress) {
@@ -291,7 +333,7 @@ function App() {
     abi: erc20Abi,
     functionName: "balanceOf",
     args: normalizedAddress ? [normalizedAddress] : undefined,
-    query: { enabled: isConnected && usdcAddress !== zeroAddress },
+    query: { enabled: walletConnected && usdcAddress !== zeroAddress },
   });
 
   useWatchContractEvent({
@@ -314,12 +356,25 @@ function App() {
   });
 
   async function ensureArc() {
-    if (!isConnected) {
+    if (!walletConnected) {
       throw new Error("Connect a wallet first.");
     }
 
-    if (chainId !== arcTestnet.id) {
+    if (walletChainId !== arcTestnet.id) {
       await switchChainAsync({ chainId: arcTestnet.id });
+      setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
+    }
+  }
+
+  async function requestArcNetwork() {
+    setError("");
+
+    try {
+      await switchChainAsync({ chainId: arcTestnet.id });
+      setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
+    } catch (cause) {
+      if (isUserRejectedRequest(cause)) return;
+      setError(cause instanceof Error ? cause.message : "Could not switch to Arc testnet.");
     }
   }
 
@@ -571,10 +626,38 @@ function App() {
     setError("");
 
     try {
-      await connectAsync({ connector, chainId: arcTestnet.id });
+      const result = await connectAsync({ connector });
+      const connectedAccount = result.accounts[0];
+
+      setWalletSession({
+        address: getAddress(connectedAccount),
+        chainId: result.chainId,
+        connector,
+      });
+
+      if (result.chainId !== arcTestnet.id) {
+        try {
+          await switchChainAsync({ chainId: arcTestnet.id });
+          setWalletSession((current) => (current ? { ...current, chainId: arcTestnet.id } : current));
+        } catch (switchCause) {
+          if (isUserRejectedRequest(switchCause)) return;
+          setError("Wallet connected. Use Switch/Add Arc before deployment or payments.");
+        }
+      }
     } catch (cause) {
       if (isUserRejectedRequest(cause)) return;
       setError(cause instanceof Error ? cause.message : "Wallet connection failed.");
+    }
+  }
+
+  async function disconnectWallet() {
+    setError("");
+    setWalletSession(null);
+
+    try {
+      await disconnectAsync(currentConnector ? { connector: currentConnector } : undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Wallet disconnect failed.");
     }
   }
 
@@ -597,7 +680,7 @@ function App() {
 
         <button className="connect" onClick={() => setTab("connect")}>
           <Wallet size={18} />
-          {isConnected ? shortAddress(normalizedAddress) : "Connect Wallet"}
+          {walletConnected ? shortAddress(normalizedAddress) : "Connect Wallet"}
         </button>
 
         <div className="navTabs" aria-label="Dashboard sections">
@@ -640,8 +723,8 @@ function App() {
             <span className="network">{activeNetwork}</span>
             <h2>Policy-controlled USDC vaults for autonomous AI agents</h2>
             <div className="statusRow">
-              <span className={isConnected ? "statusChip ready" : "statusChip"}>
-                {isConnected ? "Wallet connected" : "Wallet required"}
+              <span className={walletConnected ? "statusChip ready" : "statusChip"}>
+                {walletConnected ? "Wallet connected" : "Wallet required"}
               </span>
               <span className={onArc ? "statusChip ready" : "statusChip"}>
                 {onArc ? "Arc selected" : "Switch to Arc"}
@@ -658,10 +741,10 @@ function App() {
         </header>
 
         {error && <div className="notice danger">{error}</div>}
-        {!onArc && isConnected && (
+        {!onArc && walletConnected && (
           <div className="notice">
-            <span>Wallet is on chain {chainId}. Switch or add Arc testnet before deployment and payments.</span>
-            <button onClick={() => switchChainAsync({ chainId: arcTestnet.id })} disabled={isSwitching}>
+            <span>Wallet is on chain {walletChainId}. Switch or add Arc testnet before deployment and payments.</span>
+            <button onClick={requestArcNetwork} disabled={isSwitching}>
               <PlugZap size={17} />
               Switch/Add Arc
             </button>
@@ -675,14 +758,14 @@ function App() {
               <h3>Connect Wallet</h3>
             </div>
 
-            {isConnected && (
+            {walletConnected && (
               <div className="walletSummary">
                 <div>
                   <span>Connected</span>
                   <strong>{shortAddress(normalizedAddress)}</strong>
-                  <small>{activeConnector?.name}</small>
+                  <small>{currentConnector?.name}</small>
                 </div>
-                <button className="secondaryButton" onClick={() => disconnect()}>
+                <button className="secondaryButton" onClick={disconnectWallet}>
                   <Power size={17} />
                   Disconnect
                 </button>
@@ -760,7 +843,7 @@ function App() {
                 </button>
               </div>
             ) : (
-              <button disabled={!isConnected || !onArc || busy} onClick={deployProtocol}>
+              <button disabled={!walletConnected || !onArc || busy} onClick={deployProtocol}>
                 <PlugZap size={18} />
                 Deploy From Connected Wallet
               </button>
