@@ -164,16 +164,19 @@ h4 {
 
 .navTabs {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .navTab {
   width: 100%;
-  min-height: 50px;
-  justify-content: start;
+  min-height: 54px;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
   background: transparent;
   color: #cfe0db;
-  padding: 8px 10px;
+  padding: 0 12px;
+  text-align: left;
 }
 
 .navTab:hover:not(:disabled),
@@ -184,20 +187,23 @@ h4 {
 }
 
 .navTab > span {
+  min-width: 0;
   display: grid;
   gap: 2px;
 }
 
 .navTab strong {
-  font-size: 0.94rem;
+  font-size: 0.93rem;
   line-height: 1.1;
+  white-space: nowrap;
 }
 
 .navTab small {
   color: #9fb7b1;
-  font-size: 0.74rem;
+  font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.2;
+  white-space: normal;
 }
 
 .navTab.active small {
@@ -334,6 +340,10 @@ textarea:focus {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.actions.single {
+  grid-template-columns: 1fr;
 }
 
 .secondaryButton {
@@ -544,18 +554,13 @@ textarea:focus {
   align-items: start;
 }
 
-.subPanel,
-.quickPay {
+.subPanel {
   border: 1px solid #d8e1dc;
   border-radius: 8px;
   background: #fbfcfb;
   padding: 14px;
   display: grid;
   gap: 13px;
-}
-
-.quickPay {
-  background: #f7faf8;
 }
 
 .stepLabel {
@@ -578,6 +583,11 @@ textarea:focus {
   padding: 14px;
   display: grid;
   gap: 12px;
+}
+
+.serviceCard.approved {
+  border-color: #bfe0d5;
+  background: #f7fcfa;
 }
 
 .serviceCardHeader {
@@ -613,6 +623,17 @@ textarea:focus {
 .serviceDescription {
   min-height: 40px;
   line-height: 1.35;
+}
+
+.approvalHint {
+  color: #60706b;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.approvalHint.approved {
+  color: #0e6a5e;
+  font-weight: 800;
 }
 
 .serviceMeta {

@@ -6,6 +6,7 @@ import {
   Cpu,
   Database,
   FileSearch,
+  Lock,
   PlugZap,
   Power,
   RefreshCw,
@@ -18,7 +19,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import {
   formatUnits,
   getAddress,
@@ -93,6 +94,7 @@ type ConnectedWalletSession = {
   chainId: number;
   connector: Connector;
 };
+type ServiceReceiverState = Record<ServiceId, string>;
 type ServicePreset = {
   id: ServiceId;
   title: string;
@@ -296,6 +298,111 @@ function WalletConnectMark() {
   );
 }
 
+type ServiceCardProps = {
+  busy: boolean;
+  canPayFromWallet: boolean;
+  isOwner: boolean;
+  paymentsLocked: boolean;
+  selectedVault?: Address;
+  service: ServicePreset;
+  serviceReceivers: ServiceReceiverState;
+  setServiceReceivers: Dispatch<SetStateAction<ServiceReceiverState>>;
+  allowServiceReceiver: (service: ServicePreset) => Promise<void>;
+  payService: (service: ServicePreset) => Promise<void>;
+};
+
+function ServiceCard({
+  busy,
+  canPayFromWallet,
+  isOwner,
+  paymentsLocked,
+  selectedVault,
+  service,
+  serviceReceivers,
+  setServiceReceivers,
+  allowServiceReceiver,
+  payService,
+}: ServiceCardProps) {
+  const Icon = service.Icon;
+  const receiver = serviceReceivers[service.id];
+  const receiverReady = isAddress(receiver);
+  const normalizedReceiver = receiverReady ? getAddress(receiver) : undefined;
+  const { data: receiverApproved, refetch: refetchReceiverApproved } = useReadContract({
+    address: selectedVault,
+    abi: agentVaultAbi,
+    functionName: "whitelistedRecipients",
+    args: normalizedReceiver ? [normalizedReceiver] : undefined,
+    query: { enabled: Boolean(selectedVault && normalizedReceiver) },
+  });
+  const approved = receiverReady && Boolean(receiverApproved);
+
+  async function approveReceiver() {
+    await allowServiceReceiver(service);
+    await refetchReceiverApproved();
+  }
+
+  async function payApprovedService() {
+    if (!approved) return;
+    await payService(service);
+  }
+
+  return (
+    <article className={approved ? "serviceCard approved" : "serviceCard"}>
+      <div className="serviceCardHeader">
+        <span className="serviceIcon">
+          <Icon size={19} />
+        </span>
+        <div>
+          <h4>{service.title}</h4>
+          <span>{service.category}</span>
+        </div>
+      </div>
+      <p className="serviceDescription">{service.description}</p>
+      <div className="serviceMeta">
+        <span>Amount</span>
+        <strong>{service.amount} USDC</strong>
+      </div>
+      <div className="serviceMeta">
+        <span>Memo</span>
+        <strong>{service.memo}</strong>
+      </div>
+      <label>
+        Payee wallet
+        <input
+          value={receiver}
+          onChange={(event) =>
+            setServiceReceivers((current) => ({
+              ...current,
+              [service.id]: event.target.value,
+            }))
+          }
+          placeholder="0x..."
+        />
+        <span className={approved ? "approvalHint approved" : "approvalHint"}>
+          {approved ? "Approved. This service can now receive vault payments." : "Approve this wallet before payment unlocks."}
+        </span>
+      </label>
+      <div className="serviceActions">
+        <button
+          className="secondaryButton"
+          disabled={!selectedVault || !receiverReady || busy || !isOwner || approved}
+          onClick={approveReceiver}
+        >
+          <ShieldCheck size={17} />
+          {approved ? "Approved" : "Approve"}
+        </button>
+        <button
+          disabled={!selectedVault || !receiverReady || !approved || busy || paymentsLocked || !canPayFromWallet}
+          onClick={payApprovedService}
+        >
+          {approved ? <Activity size={17} /> : <Lock size={17} />}
+          {approved ? "Pay" : "Locked"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
 async function switchProviderToArc(provider: EIP1193Provider) {
   try {
     await provider.request({
@@ -335,10 +442,7 @@ function App() {
   const [whitelist, setWhitelist] = useState("");
   const [vaultAddress, setVaultAddress] = useState("");
   const [depositAmount, setDepositAmount] = useState("50");
-  const [recipient, setRecipient] = useState("");
-  const [paymentAmount, setPaymentAmount] = useState("0.25");
-  const [memo, setMemo] = useState("api-call");
-  const [serviceReceivers, setServiceReceivers] = useState<Record<ServiceId, string>>({
+  const [serviceReceivers, setServiceReceivers] = useState<ServiceReceiverState>({
     "market-data": "",
     inference: "",
     dataset: "",
@@ -448,6 +552,12 @@ function App() {
     address: selectedVault,
     abi: agentVaultAbi,
     functionName: "agent",
+    query: { enabled: Boolean(selectedVault) },
+  });
+  const { data: vaultPaused, refetch: refetchVaultPaused } = useReadContract({
+    address: selectedVault,
+    abi: agentVaultAbi,
+    functionName: "paused",
     query: { enabled: Boolean(selectedVault) },
   });
   const { data: walletUsdc, refetch: refetchWalletUsdc } = useReadContract({
@@ -730,24 +840,6 @@ function App() {
     }
   }
 
-  async function payRecipient() {
-    if (!selectedVault || !isAddress(recipient) || !canPayFromWallet) return;
-    setError("");
-
-    try {
-      await ensureArc();
-      await writeAndWait({
-        address: selectedVault,
-        abi: agentVaultAbi,
-        functionName: "pay",
-        args: [getAddress(recipient), toUsdc(paymentAmount), memo],
-      });
-      await Promise.all([refetchBalance(), refetchSpent()]);
-    } catch (cause) {
-      setError(friendlyError(cause, "Could not send payment."));
-    }
-  }
-
   async function allowServiceReceiver(service: ServicePreset) {
     const receiver = serviceReceivers[service.id];
     if (!selectedVault || !isAddress(receiver) || !isOwner) return;
@@ -761,9 +853,10 @@ function App() {
         functionName: "setRecipient",
         args: [getAddress(receiver), true],
       });
-      setRecipient(getAddress(receiver));
-      setPaymentAmount(service.amount);
-      setMemo(service.memo);
+      setServiceReceivers((current) => ({
+        ...current,
+        [service.id]: getAddress(receiver),
+      }));
     } catch (cause) {
       setError(friendlyError(cause, "Could not approve service receiver."));
     }
@@ -782,9 +875,6 @@ function App() {
         functionName: "pay",
         args: [getAddress(receiver), toUsdc(service.amount), service.memo],
       });
-      setRecipient(getAddress(receiver));
-      setPaymentAmount(service.amount);
-      setMemo(service.memo);
       await Promise.all([refetchBalance(), refetchSpent()]);
     } catch (cause) {
       setError(friendlyError(cause, "Could not pay service."));
@@ -803,6 +893,7 @@ function App() {
         functionName: paused ? "pause" : "unpause",
         args: [],
       });
+      await refetchVaultPaused();
     } catch (cause) {
       setError(friendlyError(cause, "Could not update vault state."));
     }
@@ -1204,12 +1295,13 @@ function App() {
                     Faucet
                   </a>
                 </div>
-                <div className="actions">
-                  <button className="secondaryButton" disabled={!selectedVault || busy || !isOwner} onClick={() => setPaused(true)}>
-                    Pause
-                  </button>
-                  <button className="secondaryButton" disabled={!selectedVault || busy || !isOwner} onClick={() => setPaused(false)}>
-                    Unpause
+                <div className="actions single">
+                  <button
+                    className="secondaryButton"
+                    disabled={!selectedVault || busy || !isOwner}
+                    onClick={() => setPaused(!vaultPaused)}
+                  >
+                    {vaultPaused ? "Unpause Vault" : "Pause Vault"}
                   </button>
                 </div>
               </section>
@@ -1238,92 +1330,22 @@ function App() {
               </div>
             </div>
 
-            <section className="quickPay">
-              <div>
-                <span className="stepLabel">Manual payment</span>
-                <h4>Pay any approved receiver</h4>
-                <p className="muted">Use this when the service is not in the presets below.</p>
-              </div>
-              <div className="split">
-                <label>
-                  Recipient
-                  <input value={recipient} onChange={(event) => setRecipient(event.target.value)} />
-                </label>
-                <label>
-                  Amount
-                  <input value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
-                </label>
-              </div>
-              <label>
-                Memo
-                <input value={memo} onChange={(event) => setMemo(event.target.value)} />
-              </label>
-              <button disabled={!selectedVault || !isAddress(recipient) || busy || !canPayFromWallet} onClick={payRecipient}>
-                <Activity size={18} />
-                Send Payment
-              </button>
-            </section>
-
             <div className="serviceGrid">
-              {servicePresets.map((service) => {
-                const Icon = service.Icon;
-                const receiver = serviceReceivers[service.id];
-                const receiverReady = isAddress(receiver);
-
-                return (
-                  <article className="serviceCard" key={service.id}>
-                    <div className="serviceCardHeader">
-                      <span className="serviceIcon">
-                        <Icon size={19} />
-                      </span>
-                      <div>
-                        <h4>{service.title}</h4>
-                        <span>{service.category}</span>
-                      </div>
-                    </div>
-                    <p className="serviceDescription">{service.description}</p>
-                    <div className="serviceMeta">
-                      <span>Amount</span>
-                      <strong>{service.amount} USDC</strong>
-                    </div>
-                    <div className="serviceMeta">
-                      <span>Memo</span>
-                      <strong>{service.memo}</strong>
-                    </div>
-                    <label>
-                      Payee wallet
-                      <input
-                        value={receiver}
-                        onChange={(event) =>
-                          setServiceReceivers((current) => ({
-                            ...current,
-                            [service.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="0x..."
-                      />
-                      <span className="hint">This wallet receives the actual Arc testnet USDC.</span>
-                    </label>
-                    <div className="serviceActions">
-                      <button
-                        className="secondaryButton"
-                        disabled={!selectedVault || !receiverReady || busy || !isOwner}
-                        onClick={() => allowServiceReceiver(service)}
-                      >
-                        <ShieldCheck size={17} />
-                        Approve
-                      </button>
-                      <button
-                        disabled={!selectedVault || !receiverReady || busy || !canPayFromWallet}
-                        onClick={() => payService(service)}
-                      >
-                        <Activity size={17} />
-                        Pay
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
+              {servicePresets.map((service) => (
+                <ServiceCard
+                  allowServiceReceiver={allowServiceReceiver}
+                  busy={busy}
+                  canPayFromWallet={canPayFromWallet}
+                  isOwner={isOwner}
+                  key={service.id}
+                  paymentsLocked={Boolean(vaultPaused)}
+                  payService={payService}
+                  selectedVault={selectedVault}
+                  service={service}
+                  serviceReceivers={serviceReceivers}
+                  setServiceReceivers={setServiceReceivers}
+                />
+              ))}
             </div>
           </section>
         )}
