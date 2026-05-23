@@ -97,7 +97,7 @@ type ConnectedWalletSession = {
   connector: Connector;
 };
 type ServiceReceiverState = Record<ServiceId, string>;
-type DeploymentOrigin = "active" | "history" | null;
+type DeploymentOrigin = "active" | "history" | "imported" | null;
 type ServicePreset = {
   id: ServiceId;
   title: string;
@@ -236,8 +236,28 @@ function formatDeploymentTime(value?: string) {
   return date.toLocaleString();
 }
 
+function formatDeploymentSource(source?: string, origin?: DeploymentOrigin) {
+  if (origin === "history") return "wallet history";
+  if (source === "manual-import") return "manual import";
+  if (source === "browser-wallet") return "browser wallet";
+  return source || "browser wallet";
+}
+
 function resolveAddress(value?: string | null): Address {
   return value && isAddress(value) ? getAddress(value) : zeroAddress;
+}
+
+function requireReadAddress(value: unknown, label: string): Address {
+  if (typeof value !== "string" || !isAddress(value)) {
+    throw new Error(`${label} is not a valid address.`);
+  }
+
+  const addressValue = getAddress(value);
+  if (addressValue === zeroAddress) {
+    throw new Error(`${label} is the zero address.`);
+  }
+
+  return addressValue;
 }
 
 function connectorLabel(connector: Connector) {
@@ -281,9 +301,9 @@ function getNextDeployStep(deployment: DeploymentFile | null): DeployStep | null
   if (!deployment.auditLog) return "AuditLog";
   if (!deployment.yieldRouter) return "YieldRouter";
   if (!deployment.vaultFactory) return "VaultFactory";
+  if (!deployment.factoryPermission) return "FactoryPermission";
   if (!deployment.settler) return "Settler";
   if (!deployment.cctpReceiver) return "CCTPReceiver";
-  if (!deployment.factoryPermission) return "FactoryPermission";
   if (!deployment.settlerPermission) return "SettlerPermission";
   return null;
 }
@@ -463,6 +483,8 @@ function App() {
   const [deployment, setDeployment] = useState<DeploymentFile | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<DeploymentFile[]>([]);
   const [deploymentOrigin, setDeploymentOrigin] = useState<DeploymentOrigin>(null);
+  const [importFactoryAddress, setImportFactoryAddress] = useState("");
+  const [importingFactory, setImportingFactory] = useState(false);
   const [deployStep, setDeployStep] = useState<DeployStep | null>(null);
   const [walletSession, setWalletSession] = useState<ConnectedWalletSession | null>(null);
   const [error, setError] = useState("");
@@ -549,6 +571,12 @@ function App() {
   const activeNetwork = deployment?.network || arcTestnet.name;
   const nextDeployStep = getNextDeployStep(deployment);
   const nextDeployAction = nextDeployStep ? deployActions[nextDeployStep] : null;
+  const vaultFactoryReady = Boolean(
+    deployment && isOwner && factoryAddress !== zeroAddress && usdcAddress !== zeroAddress && deployment.factoryPermission,
+  );
+  const deploymentReady = vaultFactoryReady && !nextDeployStep;
+  const deploymentStatusText = deploymentReady ? "Deployment ready" : vaultFactoryReady ? "Factory ready" : "Deploy from wallet";
+  const vaultPrerequisiteLabel = deploymentReady ? "Protocol deployed" : vaultFactoryReady ? "Factory ready" : "Deploy or import factory";
 
   const selectedVault = isAddress(vaultAddress) ? getAddress(vaultAddress) : undefined;
   const agentId = useMemo(() => keccak256(stringToBytes(agentName || "agent")), [agentName]);
@@ -697,6 +725,109 @@ function App() {
     setVaultAddress(restoredDeployment.vault ?? "");
   }
 
+  async function importDeploymentFromFactory() {
+    if (!normalizedAddress) {
+      setError("Connect a wallet first.");
+      return;
+    }
+
+    if (!publicClient) {
+      setError("Arc RPC is not ready.");
+      return;
+    }
+
+    if (!isAddress(importFactoryAddress)) {
+      setError("Enter a valid Vault Factory address.");
+      return;
+    }
+
+    const vaultFactory = getAddress(importFactoryAddress);
+    setError("");
+    setImportingFactory(true);
+
+    try {
+      await ensureArc();
+
+      const code = await publicClient.getCode({ address: vaultFactory });
+      if (!code || code === "0x") {
+        throw new Error("No contract found at that address on Arc testnet.");
+      }
+
+      let ownerResult: unknown;
+      let usdcResult: unknown;
+      let policyEngineResult: unknown;
+      let yieldRouterResult: unknown;
+      let auditLogResult: unknown;
+
+      try {
+        [ownerResult, usdcResult, policyEngineResult, yieldRouterResult, auditLogResult] = await Promise.all([
+          publicClient.readContract({ address: vaultFactory, abi: vaultFactoryAbi, functionName: "owner" }),
+          publicClient.readContract({ address: vaultFactory, abi: vaultFactoryAbi, functionName: "usdc" }),
+          publicClient.readContract({ address: vaultFactory, abi: vaultFactoryAbi, functionName: "policyEngine" }),
+          publicClient.readContract({ address: vaultFactory, abi: vaultFactoryAbi, functionName: "yieldRouter" }),
+          publicClient.readContract({ address: vaultFactory, abi: vaultFactoryAbi, functionName: "auditLog" }),
+        ]);
+      } catch {
+        throw new Error("This is not an AXON Vault Factory on Arc testnet.");
+      }
+
+      const owner = requireReadAddress(ownerResult, "Factory owner");
+      const usdc = requireReadAddress(usdcResult, "Factory USDC");
+      const policyEngine = requireReadAddress(policyEngineResult, "Policy engine");
+      const yieldRouter = requireReadAddress(yieldRouterResult, "Yield router");
+      const auditLog = requireReadAddress(auditLogResult, "Audit log");
+      const expectedUsdc = resolveAddress(configuredUsdc);
+
+      if (owner !== normalizedAddress) {
+        throw new Error("Factory owner does not match the connected wallet.");
+      }
+
+      if (expectedUsdc === zeroAddress || usdc !== expectedUsdc) {
+        throw new Error("Factory USDC does not match the configured Arc testnet USDC.");
+      }
+
+      const [auditOwnerResult, factoryPermissionResult] = await Promise.all([
+        publicClient.readContract({ address: auditLog, abi: auditLogAbi, functionName: "owner" }),
+        publicClient.readContract({
+          address: auditLog,
+          abi: auditLogAbi,
+          functionName: "authorizedFactories",
+          args: [vaultFactory],
+        }),
+      ]);
+      const auditOwner = requireReadAddress(auditOwnerResult, "Audit log owner");
+
+      if (auditOwner !== normalizedAddress) {
+        throw new Error("Audit log owner does not match the connected wallet.");
+      }
+
+      const importedDeployment: DeploymentFile = {
+        network: arcTestnet.name,
+        chainId: arcTestnet.id,
+        deployer: normalizedAddress,
+        usdc,
+        policyEngine,
+        auditLog,
+        yieldRouter,
+        vaultFactory,
+        factoryPermission: factoryPermissionResult === true,
+        source: "manual-import",
+      };
+      const savedDeployment = saveStoredDeployment(normalizedAddress, importedDeployment, arcTestnet.id) ?? importedDeployment;
+
+      setDeployment(savedDeployment);
+      setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
+      setDeploymentOrigin("imported");
+      setDeployStep(getNextDeployStep(savedDeployment));
+      setVaultAddress(savedDeployment.vault ?? "");
+      setImportFactoryAddress("");
+    } catch (cause) {
+      setError(friendlyError(cause, "Could not import factory."));
+    } finally {
+      setImportingFactory(false);
+    }
+  }
+
   async function deployAndWait(contract: { abi: Abi; bytecode: Hex }, args?: readonly unknown[]) {
     if (!publicClient) throw new Error("Arc RPC is not ready.");
     const hash = await deployContractAsync({
@@ -821,7 +952,7 @@ function App() {
   }
 
   async function createVault() {
-    if (!publicClient || factoryAddress === zeroAddress || !isAddress(agentAddress) || !isOwner) return;
+    if (!publicClient || !vaultFactoryReady || factoryAddress === zeroAddress || !isAddress(agentAddress) || !isOwner) return;
     setError("");
 
     try {
@@ -1013,12 +1144,12 @@ function App() {
     }
   }
 
-  const configured = Boolean(deployment && isOwner && factoryAddress !== zeroAddress && usdcAddress !== zeroAddress);
-  const deploymentReady = configured && !nextDeployStep;
   const canPayFromWallet =
     Boolean(normalizedAddress && vaultAgent) && getAddress(vaultAgent!) === normalizedAddress;
   const walletConnectReady = connectors.some(isWalletConnect);
   const walletConnectMissing = !walletConnectProjectId && !walletConnectReady;
+  const canImportFactory =
+    walletConnected && onArc && !busy && !importingFactory && Boolean(publicClient) && isAddress(importFactoryAddress);
 
   return (
     <main className="shell">
@@ -1078,10 +1209,10 @@ function App() {
               <span className={onArc ? "statusChip ready" : "statusChip"}>
                 {onArc ? "Arc selected" : "Switch to Arc"}
               </span>
-              <span className={deploymentReady ? "statusChip ready" : "statusChip"}>
-                {deploymentReady ? "Deployment ready" : "Deploy from wallet"}
+              <span className={vaultFactoryReady ? "statusChip ready" : "statusChip"}>
+                {deploymentStatusText}
               </span>
-              {deploymentReady && <span>Factory {shortAddress(factoryAddress)}</span>}
+              {factoryAddress !== zeroAddress && <span>Factory {shortAddress(factoryAddress)}</span>}
             </div>
           </div>
           <button className="iconButton" onClick={() => Promise.all([refetchBalance(), refetchSpent(), refetchWalletUsdc()])}>
@@ -1188,10 +1319,41 @@ function App() {
                 </button>
               </div>
             )}
+            <form
+              className="importPanel"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void importDeploymentFromFactory();
+              }}
+            >
+              <div className="importPanelHeader">
+                <span>Manual import</span>
+                <strong>Use an existing AXON Vault Factory</strong>
+                <small>Wrong contract or wrong owner will not be saved.</small>
+              </div>
+              <div className="importRow">
+                <label>
+                  Factory address
+                  <input
+                    value={importFactoryAddress}
+                    onChange={(event) => setImportFactoryAddress(event.target.value)}
+                    placeholder="0x..."
+                  />
+                </label>
+                <button className="secondaryButton" disabled={!canImportFactory} type="submit">
+                  <FileSearch size={17} />
+                  {importingFactory ? "Checking..." : "Import"}
+                </button>
+              </div>
+            </form>
             <div className="deploymentGrid">
               <div>
                 <span>Owner wallet</span>
                 <strong>{normalizedAddress ? shortAddress(normalizedAddress) : "Not connected"}</strong>
+              </div>
+              <div>
+                <span>Vault Factory</span>
+                <strong>{factoryAddress !== zeroAddress ? shortAddress(factoryAddress) : "Not imported"}</strong>
               </div>
               <div>
                 <span>USDC</span>
@@ -1199,11 +1361,11 @@ function App() {
               </div>
               <div>
                 <span>Source</span>
-                <strong>{deploymentOrigin === "history" ? "wallet history" : deployment?.source || "browser wallet"}</strong>
+                <strong>{formatDeploymentSource(deployment?.source, deploymentOrigin)}</strong>
               </div>
               <div>
                 <span>Status</span>
-                <strong>{deploymentReady ? "Ready" : deployStep || nextDeployStep || "Not deployed"}</strong>
+                <strong>{deploymentReady ? "Ready" : vaultFactoryReady ? "Factory ready" : deployStep || nextDeployStep || "Not deployed"}</strong>
               </div>
               <div>
                 <span>Detected</span>
@@ -1232,12 +1394,18 @@ function App() {
               </div>
             )}
 
-            {deploymentReady ? (
+            {vaultFactoryReady ? (
               <div className="deploymentActions">
                 <button onClick={() => setTab("vault")}>
                   <CheckCircle2 size={18} />
                   Continue
                 </button>
+                {!deploymentReady && nextDeployAction && (
+                  <button className="secondaryButton" disabled={!walletConnected || !onArc || busy} onClick={runDeployStep}>
+                    <PlugZap size={18} />
+                    {nextDeployAction.label}
+                  </button>
+                )}
                 <button className="secondaryButton" onClick={forgetDeployment}>
                   Clear Active View
                 </button>
@@ -1262,9 +1430,9 @@ function App() {
             </div>
 
             <div className="flowStrip" aria-label="Vault workflow">
-              <div className={deploymentReady ? "flowStep ready" : "flowStep"}>
+              <div className={vaultFactoryReady ? "flowStep ready" : "flowStep"}>
                 <CheckCircle2 size={17} />
-                <span>Protocol deployed</span>
+                <span>{vaultPrerequisiteLabel}</span>
               </div>
               <div className={selectedVault ? "flowStep ready" : "flowStep"}>
                 <CheckCircle2 size={17} />
@@ -1328,7 +1496,7 @@ function App() {
                     placeholder="Optional: paste receiver wallet addresses"
                   />
                 </label>
-                <button disabled={!deploymentReady || busy || !isAddress(agentAddress)} onClick={createVault}>
+                <button disabled={!vaultFactoryReady || busy || !isAddress(agentAddress)} onClick={createVault}>
                   <Zap size={18} />
                   Create Vault
                 </button>

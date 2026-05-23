@@ -436,6 +436,41 @@ textarea:focus {
   background: #f1f8f5;
 }
 
+.importPanel {
+  border: 1px solid #d8e1dc;
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.importPanelHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.importPanelHeader span,
+.importPanelHeader small {
+  color: #60706b;
+  font-size: 0.84rem;
+}
+
+.importPanelHeader strong {
+  color: #17221f;
+}
+
+.importRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.importRow button {
+  min-width: 118px;
+}
+
 .walletIcon {
   width: 26px;
   height: 26px;
@@ -737,6 +772,7 @@ textarea:focus {
   .grid,
   .split,
   .actions,
+  .importRow,
   .serviceActions,
   .deploymentGrid,
   .restorePanel,

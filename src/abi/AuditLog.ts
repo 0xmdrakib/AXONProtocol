@@ -1,5 +1,19 @@
 export const auditLogAbi = [
   {
+    type: "function",
+    name: "owner",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "authorizedFactories",
+    stateMutability: "view",
+    inputs: [{ name: "factory", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
     type: "event",
     name: "PaymentLogged",
     inputs: [
