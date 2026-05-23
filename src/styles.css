@@ -461,6 +461,38 @@ textarea:focus {
   object-fit: cover;
 }
 
+.restorePanel {
+  border: 1px solid #c9e0d8;
+  border-radius: 8px;
+  background: #f0faf6;
+  padding: 13px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.restorePanel > svg {
+  color: #0e6a5e;
+}
+
+.restorePanel div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.restorePanel span,
+.restorePanel small {
+  color: #60706b;
+  font-size: 0.82rem;
+}
+
+.restorePanel strong {
+  color: #17221f;
+  overflow-wrap: anywhere;
+}
+
 .deploymentGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -707,9 +739,14 @@ textarea:focus {
   .actions,
   .serviceActions,
   .deploymentGrid,
+  .restorePanel,
   .flowStrip,
   .vaultSections {
     grid-template-columns: 1fr;
+  }
+
+  .restorePanel > svg {
+    display: none;
   }
 
   .walletSummary {

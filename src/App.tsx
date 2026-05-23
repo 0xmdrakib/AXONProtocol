@@ -2,6 +2,7 @@ import {
   Activity,
   Bot,
   CheckCircle2,
+  Clock3,
   CircleDollarSign,
   Cpu,
   Database,
@@ -57,6 +58,7 @@ import { arcTestnet } from "./config/chains";
 import {
   clearStoredDeployment,
   DEFAULT_USDC_ADDRESS,
+  loadDeploymentHistory,
   loadStoredDeployment,
   saveStoredDeployment,
   type DeploymentFile,
@@ -95,6 +97,7 @@ type ConnectedWalletSession = {
   connector: Connector;
 };
 type ServiceReceiverState = Record<ServiceId, string>;
+type DeploymentOrigin = "active" | "history" | null;
 type ServicePreset = {
   id: ServiceId;
   title: string;
@@ -224,6 +227,13 @@ function toUsdc(value: string) {
 function shortAddress(value?: string) {
   if (!value) return "0x...";
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function formatDeploymentTime(value?: string) {
+  if (!value) return "No timestamp";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No timestamp";
+  return date.toLocaleString();
 }
 
 function resolveAddress(value?: string | null): Address {
@@ -451,6 +461,8 @@ function App() {
   });
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [deployment, setDeployment] = useState<DeploymentFile | null>(null);
+  const [deploymentHistory, setDeploymentHistory] = useState<DeploymentFile[]>([]);
+  const [deploymentOrigin, setDeploymentOrigin] = useState<DeploymentOrigin>(null);
   const [deployStep, setDeployStep] = useState<DeployStep | null>(null);
   const [walletSession, setWalletSession] = useState<ConnectedWalletSession | null>(null);
   const [error, setError] = useState("");
@@ -472,10 +484,24 @@ function App() {
   useEffect(() => {
     if (!normalizedAddress) {
       setDeployment(null);
+      setDeploymentHistory([]);
+      setDeploymentOrigin(null);
       return;
     }
 
-    setDeployment(loadStoredDeployment(normalizedAddress, arcTestnet.id));
+    const currentDeployment = loadStoredDeployment(normalizedAddress, arcTestnet.id);
+    const walletHistory = loadDeploymentHistory(normalizedAddress, arcTestnet.id);
+
+    setDeploymentHistory(walletHistory);
+
+    if (currentDeployment) {
+      setDeployment(currentDeployment);
+      setDeploymentOrigin("active");
+      return;
+    }
+
+    setDeployment(walletHistory[0] ?? null);
+    setDeploymentOrigin(walletHistory[0] ? "history" : null);
   }, [normalizedAddress]);
 
   useEffect(() => {
@@ -654,8 +680,21 @@ function App() {
 
   function saveDeploymentProgress(nextDeployment: DeploymentFile) {
     if (!normalizedAddress) return;
-    saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id);
-    setDeployment(nextDeployment);
+    const savedDeployment = saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id) ?? nextDeployment;
+    setDeployment(savedDeployment);
+    setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
+    setDeploymentOrigin("active");
+  }
+
+  function restoreDeployment(nextDeployment: DeploymentFile) {
+    if (!normalizedAddress) return;
+    const restoredDeployment = saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id) ?? nextDeployment;
+
+    setDeployment(restoredDeployment);
+    setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
+    setDeploymentOrigin("active");
+    setDeployStep(getNextDeployStep(restoredDeployment));
+    setVaultAddress(restoredDeployment.vault ?? "");
   }
 
   async function deployAndWait(contract: { abi: Abi; bytecode: Hex }, args?: readonly unknown[]) {
@@ -694,7 +733,7 @@ function App() {
         vaultFactoryArtifact,
         yieldRouterArtifact,
       } = await import("./abi/protocolArtifacts");
-      const currentDeployment = deployment ?? baseDeployment();
+      const currentDeployment = deployment ?? deploymentHistory[0] ?? baseDeployment();
 
       if (nextDeployStep === "PolicyEngine") {
         const policyEngine = await deployAndWait(policyEngineArtifact);
@@ -804,10 +843,13 @@ function App() {
         strict: true,
       });
       const vault = logs[0]?.args.vault;
-      if (vault && normalizedAddress && deployment) {
-        const nextDeployment = { ...deployment, vault: getAddress(vault) };
-        saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id);
-        setDeployment(nextDeployment);
+      if (vault && normalizedAddress) {
+        const currentDeployment = deployment ?? deploymentHistory[0];
+        const nextDeployment = { ...(currentDeployment ?? baseDeployment()), vault: getAddress(vault) };
+        const savedDeployment = saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id) ?? nextDeployment;
+        setDeployment(savedDeployment);
+        setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
+        setDeploymentOrigin("active");
         setVaultAddress(getAddress(vault));
       }
     } catch (cause) {
@@ -903,8 +945,9 @@ function App() {
     if (!normalizedAddress) return;
     clearStoredDeployment(normalizedAddress, arcTestnet.id);
     setDeployment(null);
-    setVaultAddress("");
+    setDeploymentOrigin("history");
     setDeployStep(null);
+    setVaultAddress("");
     setTab("deploy");
   }
 
@@ -1130,6 +1173,21 @@ function App() {
               <PlugZap size={19} />
               <h3>Deploy Protocol</h3>
             </div>
+            {deploymentHistory.length > 0 && (
+              <div className="restorePanel">
+                <Clock3 size={18} />
+                <div>
+                  <span>Detected from this wallet</span>
+                  <strong>
+                    {shortAddress(deploymentHistory[0].vaultFactory || deploymentHistory[0].policyEngine || deploymentHistory[0].auditLog)}
+                  </strong>
+                  <small>{formatDeploymentTime(deploymentHistory[0].savedAt ?? deploymentHistory[0].deployedAt)}</small>
+                </div>
+                <button className="secondaryButton" onClick={() => restoreDeployment(deploymentHistory[0])}>
+                  Restore
+                </button>
+              </div>
+            )}
             <div className="deploymentGrid">
               <div>
                 <span>Owner wallet</span>
@@ -1141,11 +1199,15 @@ function App() {
               </div>
               <div>
                 <span>Source</span>
-                <strong>{deployment?.source || "browser wallet"}</strong>
+                <strong>{deploymentOrigin === "history" ? "wallet history" : deployment?.source || "browser wallet"}</strong>
               </div>
               <div>
                 <span>Status</span>
                 <strong>{deploymentReady ? "Ready" : deployStep || nextDeployStep || "Not deployed"}</strong>
+              </div>
+              <div>
+                <span>Detected</span>
+                <strong>{formatDeploymentTime(deployment?.savedAt ?? deployment?.deployedAt)}</strong>
               </div>
             </div>
 
@@ -1177,7 +1239,7 @@ function App() {
                   Continue
                 </button>
                 <button className="secondaryButton" onClick={forgetDeployment}>
-                  Forget Local Deployment
+                  Clear Active View
                 </button>
               </div>
             ) : (
