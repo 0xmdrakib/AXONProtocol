@@ -59,8 +59,6 @@ USDC: 0x3600000000000000000000000000000000000000
 Faucet: https://faucet.circle.com
 ```
 
-`MockUSDC` is kept only for automated local tests. The app defaults to Arc testnet USDC.
-
 ## Tech Stack
 
 - Solidity + Hardhat
@@ -68,26 +66,6 @@ Faucet: https://faucet.circle.com
 - Wagmi + Viem
 - Arc testnet USDC
 - WalletConnect
-
-## Getting Started
-
-```bash
-npm install
-cp .env.example .env
-npm run dev
-```
-
-Open:
-
-```text
-http://localhost:5173/
-```
-
-Optional `.env`:
-
-```env
-VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
-```
 
 ## Demo Flow
 
@@ -111,4 +89,35 @@ VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
 - Cross-chain funding with future CCTP support
 - Idle fund routing with future USYC support
 
+## Getting Started
 
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment variables
+
+Create a `.env` file in the project root. then fill all env from [.env.example](./.env.example).
+
+### 3. Run the development server
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
+
+### 4. Build for production
+
+```bash
+npm run build
+npm run start
+```
+
+---
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
