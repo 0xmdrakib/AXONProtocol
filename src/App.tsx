@@ -33,6 +33,7 @@ import {
   type EIP1193Provider,
   type Hex,
   zeroAddress,
+  zeroHash,
 } from "viem";
 import {
   useAccount,
@@ -50,6 +51,7 @@ import {
 } from "wagmi";
 
 import { agentVaultAbi } from "./abi/AgentVault";
+import { axonRegistryAbi } from "./abi/AxonRegistry";
 import { auditLogAbi } from "./abi/AuditLog";
 import { erc20Abi } from "./abi/ERC20";
 import { vaultFactoryAbi } from "./abi/VaultFactory";
@@ -100,7 +102,17 @@ type ConnectedWalletSession = {
 };
 type ServiceReceiverState = Record<ServiceId, string>;
 type DeploymentOrigin = "active" | "history" | "imported" | null;
-type PendingAction = "import" | "deploy" | "vault" | "fund" | "pause" | `approve:${ServiceId}` | `pay:${ServiceId}` | null;
+type PendingAction =
+  | "import"
+  | "deploy"
+  | "attribute"
+  | "attribute-vault"
+  | "vault"
+  | "fund"
+  | "pause"
+  | `approve:${ServiceId}`
+  | `pay:${ServiceId}`
+  | null;
 type ServicePreset = {
   id: ServiceId;
   title: string;
@@ -113,6 +125,8 @@ type ServicePreset = {
 
 const configuredUsdc = (import.meta.env.VITE_USDC_ADDRESS || DEFAULT_USDC_ADDRESS) as Address;
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+const configuredRegistry = import.meta.env.VITE_AXON_REGISTRY_ADDRESS;
+const axonPlatformVersion = "axon-web/0.1.0";
 const circleFaucetUrl = "https://faucet.circle.com";
 const arcAddChainParams = {
   chainId: numberToHex(arcTestnet.id),
@@ -559,6 +573,7 @@ function App() {
   const factoryAddress = resolveAddress(deployment?.vaultFactory);
   const auditLogAddress = resolveAddress(deployment?.auditLog);
   const usdcAddress = resolveAddress(deployment?.usdc || configuredUsdc);
+  const registryAddress = isAddress(configuredRegistry || "") ? getAddress(configuredRegistry as Address) : undefined;
   const activeNetwork = deployment?.network || arcTestnet.name;
   const nextDeployStep = getNextDeployStep(deployment);
   const nextDeployAction = nextDeployStep ? deployActions[nextDeployStep] : null;
@@ -568,8 +583,21 @@ function App() {
   const deploymentReady = vaultFactoryReady && !nextDeployStep;
   const deploymentStatusText = deploymentReady ? "Deployment ready" : vaultFactoryReady ? "Factory ready" : "Deploy from wallet";
   const vaultPrerequisiteLabel = deploymentReady ? "Protocol deployed" : vaultFactoryReady ? "Factory ready" : "Deploy or import factory";
+  const activeDeployment = deployment ?? deploymentHistory[0] ?? null;
+  const deploymentAttributed = Boolean(
+    registryAddress &&
+    activeDeployment?.registryDeploymentId &&
+    activeDeployment.registry?.toLowerCase() === registryAddress.toLowerCase(),
+  );
 
   const selectedVault = isAddress(vaultAddress) ? getAddress(vaultAddress) : undefined;
+  const vaultAttributed = Boolean(
+    deploymentAttributed &&
+    activeDeployment?.vaultAttributed &&
+    activeDeployment.vault &&
+    selectedVault &&
+    activeDeployment.vault.toLowerCase() === selectedVault.toLowerCase(),
+  );
   const agentId = useMemo(() => keccak256(stringToBytes(agentName || "agent")), [agentName]);
   const recipients = useMemo(
     () =>
@@ -842,10 +870,158 @@ function App() {
     await publicClient.waitForTransactionReceipt({ hash });
   }
 
+  async function registerDeploymentOnRegistry(deploymentToRegister: DeploymentFile) {
+    if (!registryAddress) {
+      throw new Error("AXON attribution is not configured for this deployment.");
+    }
+    if (!publicClient) {
+      throw new Error("Arc RPC is not ready.");
+    }
+    if (!normalizedAddress || !deploymentToRegister.vaultFactory) {
+      throw new Error("A connected owner wallet and Vault Factory are required.");
+    }
+
+    const factory = getAddress(deploymentToRegister.vaultFactory);
+    const existing = await publicClient.readContract({
+      address: registryAddress,
+      abi: axonRegistryAbi,
+      functionName: "deployments",
+      args: [factory],
+    });
+    const existingDeploymentId = existing[0] as Hex;
+    const existingDeployer = existing[1] as Address;
+
+    if (existingDeploymentId !== zeroHash) {
+      if (getAddress(existingDeployer) !== normalizedAddress) {
+        throw new Error("This Vault Factory is already attributed to another wallet.");
+      }
+
+      saveDeploymentProgress({
+        ...deploymentToRegister,
+        registry: registryAddress,
+        registryDeploymentId: existingDeploymentId,
+      });
+      return existingDeploymentId;
+    }
+
+    const hash = await writeContractAsync({
+      address: registryAddress,
+      abi: axonRegistryAbi,
+      functionName: "registerDeployment",
+      args: [factory, axonPlatformVersion],
+      chainId: arcTestnet.id,
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const logs = await publicClient.getContractEvents({
+      address: registryAddress,
+      abi: axonRegistryAbi,
+      eventName: "DeploymentRegistered",
+      fromBlock: receipt.blockNumber,
+      toBlock: receipt.blockNumber,
+      strict: true,
+    });
+    const deploymentId = logs[0]?.args.deploymentId as Hex | undefined;
+
+    if (!deploymentId) {
+      throw new Error("AXON attribution did not return a deployment ID.");
+    }
+
+    saveDeploymentProgress({
+      ...deploymentToRegister,
+      registry: registryAddress,
+      registryDeploymentId: deploymentId,
+    });
+    return deploymentId;
+  }
+
+  async function registerVaultOnRegistry(deploymentToRegister: DeploymentFile, vault: Address, vaultAgentId: Hex) {
+    if (!registryAddress) {
+      throw new Error("AXON attribution is not configured for this deployment.");
+    }
+    if (!publicClient) {
+      throw new Error("Arc RPC is not ready.");
+    }
+    if (!normalizedAddress || !deploymentToRegister.vaultFactory || !deploymentToRegister.registryDeploymentId) {
+      throw new Error("Register the AXON deployment before attributing its vault.");
+    }
+
+    const factory = getAddress(deploymentToRegister.vaultFactory);
+    const normalizedVault = getAddress(vault);
+    const existingFactory = await publicClient.readContract({
+      address: registryAddress,
+      abi: axonRegistryAbi,
+      functionName: "factoryOfVault",
+      args: [normalizedVault],
+    });
+
+    if (existingFactory !== zeroAddress) {
+      if (getAddress(existingFactory) !== factory) {
+        throw new Error("This vault is already attributed to another AXON factory.");
+      }
+
+      saveDeploymentProgress({
+        ...deploymentToRegister,
+        registry: registryAddress,
+        agentId: vaultAgentId,
+        vault: normalizedVault,
+        vaultAttributed: true,
+      });
+      return;
+    }
+
+    const hash = await writeContractAsync({
+      address: registryAddress,
+      abi: axonRegistryAbi,
+      functionName: "registerVault",
+      args: [factory, vaultAgentId, normalizedVault],
+      chainId: arcTestnet.id,
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+
+    saveDeploymentProgress({
+      ...deploymentToRegister,
+      registry: registryAddress,
+      agentId: vaultAgentId,
+      vault: normalizedVault,
+      vaultAttributed: true,
+    });
+  }
+
+  async function attributeDeployment() {
+    if (!activeDeployment) return;
+    setError("");
+    setPendingAction("attribute");
+
+    try {
+      await ensureArc();
+      await registerDeploymentOnRegistry(activeDeployment);
+    } catch (cause) {
+      setError(friendlyError(cause, "Could not register this deployment with AXON."));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function attributeVault() {
+    if (!activeDeployment || !selectedVault || !activeDeployment.agentId) return;
+    setError("");
+    setPendingAction("attribute-vault");
+
+    try {
+      await ensureArc();
+      await registerVaultOnRegistry(activeDeployment, selectedVault, activeDeployment.agentId);
+    } catch (cause) {
+      setError(friendlyError(cause, "Could not attribute this vault to AXON."));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   async function runDeployStep() {
     if (!normalizedAddress || !nextDeployStep) return;
     setError("");
     setPendingAction("deploy");
+    let attributionAttempted = false;
 
     try {
       await ensureArc();
@@ -933,15 +1109,29 @@ function App() {
           functionName: "setWriter",
           args: [currentDeployment.settler, true],
         });
-        saveDeploymentProgress({
+        const completedDeployment = {
           ...currentDeployment,
           settlerPermission: true,
           deployedAt: currentDeployment.deployedAt ?? new Date().toISOString(),
-        });
+        };
+        saveDeploymentProgress(completedDeployment);
         setDeployStep("Saved");
+
+        if (registryAddress) {
+          attributionAttempted = true;
+          setPendingAction("attribute");
+          await registerDeploymentOnRegistry(completedDeployment);
+        }
       }
     } catch (cause) {
-      setError(friendlyError(cause, "Deployment step failed."));
+      setError(
+        friendlyError(
+          cause,
+          attributionAttempted
+            ? "Deployment is ready, but AXON attribution could not be registered. Retry it from this page."
+            : "Deployment step failed.",
+        ),
+      );
     } finally {
       setPendingAction(null);
     }
@@ -951,6 +1141,7 @@ function App() {
     if (!publicClient || !vaultFactoryReady || factoryAddress === zeroAddress || !isAddress(agentAddress) || !isOwner) return;
     setError("");
     setPendingAction("vault");
+    let vaultCreated = false;
 
     try {
       await ensureArc();
@@ -973,15 +1164,32 @@ function App() {
       const vault = logs[0]?.args.vault;
       if (vault && normalizedAddress) {
         const currentDeployment = deployment ?? deploymentHistory[0];
-        const nextDeployment = { ...(currentDeployment ?? baseDeployment()), vault: getAddress(vault) };
+        const nextDeployment = {
+          ...(currentDeployment ?? baseDeployment()),
+          agentId,
+          vault: getAddress(vault),
+        };
         const savedDeployment = saveStoredDeployment(normalizedAddress, nextDeployment, arcTestnet.id) ?? nextDeployment;
         setDeployment(savedDeployment);
         setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
         setDeploymentOrigin("active");
         setVaultAddress(getAddress(vault));
+        vaultCreated = true;
+
+        if (registryAddress && savedDeployment.registryDeploymentId) {
+          setPendingAction("attribute-vault");
+          await registerVaultOnRegistry(savedDeployment, getAddress(vault), agentId);
+        }
       }
     } catch (cause) {
-      setError(friendlyError(cause, "Could not create vault."));
+      setError(
+        friendlyError(
+          cause,
+          vaultCreated
+            ? "Vault created, but AXON could not attribute it. Retry attribution from the vault page."
+            : "Could not create vault.",
+        ),
+      );
     } finally {
       setPendingAction(null);
     }
@@ -1488,6 +1696,40 @@ function App() {
                 <span>Detected</span>
                 <strong>{formatDeploymentTime(deployment?.savedAt ?? deployment?.deployedAt)}</strong>
               </div>
+              <div>
+                <span>AXON attribution</span>
+                <strong>
+                  {!registryAddress ? "Registry not configured" : deploymentAttributed ? "Registered" : vaultFactoryReady ? "Ready to register" : "After deployment"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="attributionPanel">
+              <div>
+                <span>Platform attribution</span>
+                <strong>
+                  {deploymentAttributed
+                    ? "This user-owned deployment is linked to the canonical AXON registry."
+                    : registryAddress
+                      ? "Register the factory once so Arc can identify the AXON deployment path."
+                      : "The canonical AXON registry address has not been configured yet."}
+                </strong>
+                <small>
+                  AXON never becomes the owner of your factory or vault. Only the owner wallet can create and control them.
+                </small>
+              </div>
+              {registryAddress ? (
+                <button
+                  className="secondaryButton"
+                  type="button"
+                  disabled={!vaultFactoryReady || deploymentAttributed || busy || !activeDeployment}
+                  onClick={() => void attributeDeployment()}
+                >
+                  {pendingAction === "attribute" ? "Registering..." : deploymentAttributed ? "Registered with AXON" : "Register deployment"}
+                </button>
+              ) : (
+                <span className="attributionSetup">Set VITE_AXON_REGISTRY_ADDRESS after deploying the canonical registry.</span>
+              )}
             </div>
 
             <div className="faucetCallout">
@@ -1579,6 +1821,36 @@ function App() {
                 <strong>{spent === undefined ? "-" : `${formatUnits(spent, 6)} USDC`}</strong>
               </div>
             </div>
+
+            {selectedVault && (
+              <div className="attributionPanel compact">
+                <div>
+                  <span>AXON vault attribution</span>
+                  <strong>
+                    {vaultAttributed
+                      ? "Vault linked to the canonical AXON deployment."
+                      : !registryAddress
+                        ? "Registry not configured"
+                        : !deploymentAttributed
+                          ? "Register the deployment first"
+                          : "Vault is ready to register"}
+                  </strong>
+                  <small>Future vault activity can be mapped to AXON through the public factory and vault link.</small>
+                </div>
+                {registryAddress ? (
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    disabled={!deploymentAttributed || vaultAttributed || busy || !activeDeployment?.agentId}
+                    onClick={() => void attributeVault()}
+                  >
+                    {pendingAction === "attribute-vault" ? "Registering..." : vaultAttributed ? "Vault attributed" : "Register vault"}
+                  </button>
+                ) : (
+                  <span className="attributionSetup">Configure the canonical registry to enable vault attribution.</span>
+                )}
+              </div>
+            )}
 
             <div className="vaultSections">
               <section className="subPanel">

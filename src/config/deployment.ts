@@ -15,6 +15,10 @@ export type DeploymentFile = {
   vaultFactory?: Address;
   settler?: Address;
   cctpReceiver?: Address;
+  registry?: Address;
+  registryDeploymentId?: `0x${string}`;
+  vaultAttributed?: boolean;
+  agentId?: `0x${string}`;
   factoryPermission?: boolean;
   settlerPermission?: boolean;
   vault?: Address;
@@ -66,6 +70,7 @@ function normalizeDeployment(deployment: DeploymentFile, deployer: Address, chai
     "settler",
     "cctpReceiver",
     "vault",
+    "registry",
   ];
 
   if (addressFields.some((field) => deployment[field] !== undefined && !validAddress(deployment[field]))) {

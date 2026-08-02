@@ -36,6 +36,53 @@ describe("AXON Protocol", async function () {
     return { owner, agent, recipient, stranger, payee, usdc, policyEngine, auditLog, yieldRouter, factory, settler };
   }
 
+  it("attributes user-owned factories and vaults without taking ownership", async function () {
+    const { owner, agent, recipient, stranger, factory } = await deployProtocol();
+    const registry = await viem.deployContract("AxonRegistry");
+    const agentId = keccak256(toBytes("attribution-agent-001"));
+
+    await registry.write.registerDeployment([factory.address, "axon-web/0.1.0"]);
+
+    const deployment = await registry.read.deployments([factory.address]);
+    assert.equal(getAddress(deployment[1]), getAddress(owner.account.address));
+    assert.equal(getAddress(deployment[2]), getAddress(factory.address));
+    assert.equal(getAddress(await registry.read.platform()), getAddress(owner.account.address));
+    assert.equal(getAddress(await factory.read.owner()), getAddress(owner.account.address));
+
+    const createHash = await factory.write.createVault([
+      agentId,
+      agent.account.address,
+      parseUnits("5", 6),
+      parseUnits("2", 6),
+      [recipient.account.address],
+    ]);
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: createHash });
+    const createEvents = await publicClient.getContractEvents({
+      address: factory.address,
+      abi: factory.abi,
+      eventName: "VaultDeployed",
+      fromBlock: receipt.blockNumber,
+      toBlock: receipt.blockNumber,
+      strict: true,
+    });
+    const vaultAddress = getAddress(createEvents[0].args.vault);
+    const vault = await viem.getContractAt("AgentVault", vaultAddress);
+
+    await registry.write.registerVault([factory.address, agentId, vaultAddress]);
+
+    assert.equal(getAddress(await registry.read.factoryOfVault([vaultAddress])), getAddress(factory.address));
+    assert.equal(getAddress(await vault.read.owner()), getAddress(owner.account.address));
+
+    await assert.rejects(
+      registry.write.registerDeployment([factory.address, "axon-web/0.1.0"], { account: stranger.account }),
+      /FactoryAlreadyRegistered/,
+    );
+    await assert.rejects(
+      registry.write.registerVault([factory.address, agentId, vaultAddress], { account: stranger.account }),
+      /DeploymentOwnerRequired|VaultAlreadyAttributed/,
+    );
+  });
+
   it("creates an agent vault, routes deposits through the yield router, and pays whitelisted recipients", async function () {
     const { owner, agent, recipient, usdc, yieldRouter, factory, auditLog } = await deployProtocol();
     const agentId = keccak256(toBytes("research-agent-001"));
