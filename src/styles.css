@@ -1148,52 +1148,43 @@ textarea:focus {
   gap: 10px;
 }
 
-.attributionPanel {
-  padding: 15px;
+.requiredStep {
+  padding: 13px;
   border: 1px solid rgba(27, 139, 112, 0.18);
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 16px;
   background: rgba(27, 139, 112, 0.035);
 }
 
-.attributionPanel.compact {
-  margin-top: -2px;
-}
-
-.attributionPanel > div {
+.requiredStep > div {
   min-width: 0;
   display: grid;
   gap: 4px;
 }
 
-.attributionPanel span,
-.attributionPanel small {
-  color: var(--muted);
-  font-size: 0.79rem;
-  line-height: 1.4;
-}
-
-.attributionPanel strong {
+.requiredStep strong {
   color: var(--charcoal);
   font-size: 0.88rem;
   font-weight: 500;
   line-height: 1.35;
 }
 
-.attributionPanel button {
-  flex: 0 0 auto;
-  min-width: 155px;
+.requiredStep p {
+  margin: 0;
 }
 
-.attributionSetup {
-  max-width: 260px;
-  color: var(--strong-muted) !important;
-  font-size: 0.76rem !important;
+.requiredStep button {
+  flex: 0 0 auto;
+  min-width: 126px;
+}
+
+.requiredStep .stepLabel {
+  color: var(--muted);
+  font-size: 0.79rem;
   line-height: 1.4;
-  text-align: right;
 }
 
 .vaultPanel,
@@ -1794,13 +1785,12 @@ textarea:focus {
     width: 100%;
   }
 
-  .attributionPanel {
+  .requiredStep {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .attributionPanel button,
-  .attributionSetup {
+  .requiredStep button {
     width: 100%;
     max-width: none;
     text-align: left;

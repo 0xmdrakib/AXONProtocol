@@ -88,6 +88,7 @@ type DeployStep =
   | "CCTPReceiver"
   | "FactoryPermission"
   | "SettlerPermission"
+  | "Attribution"
   | "Saved";
 type DeployAction = {
   step: DeployStep;
@@ -177,6 +178,11 @@ const deployActions: Record<DeployStep, DeployAction> = {
     step: "SettlerPermission",
     label: "Allow Settler Writer",
     description: "Authorizes the settler to write payment audit events.",
+  },
+  Attribution: {
+    step: "Attribution",
+    label: "Register AXON deployment",
+    description: "Links your user-owned Vault Factory to AXON before the workflow can continue.",
   },
   Saved: {
     step: "Saved",
@@ -306,11 +312,17 @@ function friendlyError(cause: unknown, fallback: string) {
   return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
 }
 
-function getNextDeployStep(deployment: DeploymentFile | null): DeployStep | null {
+function getNextDeployStep(deployment: DeploymentFile | null, registryAddress?: Address): DeployStep | null {
   if (!deployment?.policyEngine) return "PolicyEngine";
   if (!deployment.auditLog) return "AuditLog";
   if (!deployment.yieldRouter) return "YieldRouter";
   if (!deployment.vaultFactory) return "VaultFactory";
+  if (
+    registryAddress &&
+    (!deployment.registryDeploymentId || deployment.registry?.toLowerCase() !== registryAddress.toLowerCase())
+  ) {
+    return "Attribution";
+  }
   if (!deployment.factoryPermission) return "FactoryPermission";
   if (!deployment.settler) return "Settler";
   if (!deployment.cctpReceiver) return "CCTPReceiver";
@@ -324,6 +336,7 @@ type ServiceCardProps = {
   isOwner: boolean;
   pendingAction: PendingAction;
   paymentsLocked: boolean;
+  vaultReadyForUse: boolean;
   selectedVault?: Address;
   service: ServicePreset;
   serviceReceivers: ServiceReceiverState;
@@ -338,6 +351,7 @@ function ServiceCard({
   isOwner,
   pendingAction,
   paymentsLocked,
+  vaultReadyForUse,
   selectedVault,
   service,
   serviceReceivers,
@@ -401,13 +415,17 @@ function ServiceCard({
           placeholder="0x..."
         />
         <span className={approved ? "approvalHint approved" : "approvalHint"}>
-          {approved ? "Approved. This service can now receive vault payments." : "Approve this wallet before payment unlocks."}
+          {!vaultReadyForUse
+            ? "Finish vault setup before approving a service."
+            : approved
+              ? "Approved. This service can now receive vault payments."
+              : "Approve this wallet before payment unlocks."}
         </span>
       </label>
       <div className="serviceActions">
         <button
           className="secondaryButton"
-          disabled={!selectedVault || !receiverReady || busy || !isOwner || approved}
+          disabled={!selectedVault || !receiverReady || busy || !isOwner || !vaultReadyForUse || approved}
           onClick={approveReceiver}
         >
           <ShieldCheck size={17} />
@@ -596,29 +614,54 @@ function App() {
   const usdcAddress = resolveAddress(deployment?.usdc || configuredUsdc);
   const registryAddress = isAddress(configuredRegistry || "") ? getAddress(configuredRegistry as Address) : undefined;
   const activeNetwork = deployment?.network || arcTestnet.name;
-  const nextDeployStep = getNextDeployStep(deployment);
-  const nextDeployAction = nextDeployStep ? deployActions[nextDeployStep] : null;
   const vaultFactoryReady = Boolean(
     deployment && isOwner && factoryAddress !== zeroAddress && usdcAddress !== zeroAddress && deployment.factoryPermission,
   );
-  const deploymentReady = vaultFactoryReady && !nextDeployStep;
-  const deploymentStatusText = deploymentReady ? "Deployment ready" : vaultFactoryReady ? "Factory ready" : "Deploy from wallet";
-  const vaultPrerequisiteLabel = deploymentReady ? "Protocol deployed" : vaultFactoryReady ? "Factory ready" : "Deploy or import factory";
   const activeDeployment = deployment ?? deploymentHistory[0] ?? null;
   const deploymentAttributed = Boolean(
     registryAddress &&
     activeDeployment?.registryDeploymentId &&
     activeDeployment.registry?.toLowerCase() === registryAddress.toLowerCase(),
   );
+  const nextDeployStep = getNextDeployStep(deployment, registryAddress);
+  const nextDeployAction = nextDeployStep ? deployActions[nextDeployStep] : null;
+  const deploymentReady = vaultFactoryReady && !nextDeployStep;
+  const deploymentStatusText =
+    deploymentReady
+      ? "Deployment ready"
+      : nextDeployStep === "Attribution"
+        ? "AXON link required"
+        : vaultFactoryReady
+          ? "Factory ready"
+          : "Deploy from wallet";
+  const vaultPrerequisiteLabel = deploymentReady
+    ? "Protocol deployed"
+    : nextDeployStep === "Attribution"
+      ? "Complete AXON link"
+      : vaultFactoryReady
+        ? "Finish deployment"
+        : "Deploy or import factory";
 
   const selectedVault = isAddress(vaultAddress) ? getAddress(vaultAddress) : undefined;
+  const { data: registeredVaultFactory, refetch: refetchRegisteredVault } = useReadContract({
+    address: registryAddress,
+    abi: axonRegistryAbi,
+    functionName: "factoryOfVault",
+    args: selectedVault ? [selectedVault] : undefined,
+    query: { enabled: Boolean(registryAddress && selectedVault && deploymentAttributed) },
+  });
+  const registeredVaultFactoryAddress =
+    typeof registeredVaultFactory === "string" && isAddress(registeredVaultFactory) ? getAddress(registeredVaultFactory) : zeroAddress;
   const vaultAttributed = Boolean(
     deploymentAttributed &&
-    activeDeployment?.vaultAttributed &&
-    activeDeployment.vault &&
-    selectedVault &&
-    activeDeployment.vault.toLowerCase() === selectedVault.toLowerCase(),
+    factoryAddress !== zeroAddress &&
+    ((activeDeployment?.vaultAttributed &&
+      activeDeployment.vault &&
+      selectedVault &&
+      activeDeployment.vault.toLowerCase() === selectedVault.toLowerCase()) ||
+      registeredVaultFactoryAddress === factoryAddress),
   );
+  const vaultReadyForUse = Boolean(selectedVault && (!registryAddress || vaultAttributed));
   const agentId = useMemo(() => keccak256(stringToBytes(agentName || "agent")), [agentName]);
   const recipients = useMemo(
     () =>
@@ -761,7 +804,7 @@ function App() {
     setDeployment(restoredDeployment);
     setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
     setDeploymentOrigin("active");
-    setDeployStep(getNextDeployStep(restoredDeployment));
+    setDeployStep(getNextDeployStep(restoredDeployment, registryAddress));
     setVaultAddress(restoredDeployment.vault ?? "");
   }
 
@@ -859,7 +902,7 @@ function App() {
       setDeployment(savedDeployment);
       setDeploymentHistory(loadDeploymentHistory(normalizedAddress, arcTestnet.id));
       setDeploymentOrigin("imported");
-      setDeployStep(getNextDeployStep(savedDeployment));
+      setDeployStep(getNextDeployStep(savedDeployment, registryAddress));
       setVaultAddress(savedDeployment.vault ?? "");
       setImportFactoryAddress("");
     } catch (cause) {
@@ -1016,21 +1059,6 @@ function App() {
     });
   }
 
-  async function attributeDeployment() {
-    if (!activeDeployment) return;
-    setError("");
-    setPendingAction("attribute");
-
-    try {
-      await ensureArc();
-      await registerDeploymentOnRegistry(activeDeployment);
-    } catch (cause) {
-      setError(friendlyError(cause, "Could not register this deployment with AXON."));
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
   async function attributeVault() {
     if (!activeDeployment || !selectedVault) return;
     setError("");
@@ -1039,6 +1067,7 @@ function App() {
     try {
       await ensureArc();
       await registerVaultOnRegistry(activeDeployment, selectedVault, activeDeployment.agentId);
+      await refetchRegisteredVault();
     } catch (cause) {
       setError(friendlyError(cause, "Could not attribute this vault to AXON."));
     } finally {
@@ -1050,7 +1079,6 @@ function App() {
     if (!normalizedAddress || !nextDeployStep) return;
     setError("");
     setPendingAction("deploy");
-    let attributionAttempted = false;
 
     try {
       await ensureArc();
@@ -1064,6 +1092,13 @@ function App() {
         yieldRouterArtifact,
       } = await import("./abi/protocolArtifacts");
       const currentDeployment = deployment ?? deploymentHistory[0] ?? baseDeployment();
+
+      if (nextDeployStep === "Attribution") {
+        setPendingAction("attribute");
+        await registerDeploymentOnRegistry(currentDeployment);
+        setDeployStep(null);
+        return;
+      }
 
       if (nextDeployStep === "PolicyEngine") {
         const policyEngine = await deployAndWait(policyEngineArtifact);
@@ -1145,19 +1180,13 @@ function App() {
         };
         saveDeploymentProgress(completedDeployment);
         setDeployStep("Saved");
-
-        if (registryAddress) {
-          attributionAttempted = true;
-          setPendingAction("attribute");
-          await registerDeploymentOnRegistry(completedDeployment);
-        }
       }
     } catch (cause) {
       setError(
         friendlyError(
           cause,
-          attributionAttempted
-            ? "Deployment is ready, but AXON attribution could not be registered. Retry it from this page."
+          nextDeployStep === "Attribution"
+            ? "AXON registration is required before the deployment can continue. Retry this step to continue."
             : "Deployment step failed.",
         ),
       );
@@ -1167,7 +1196,7 @@ function App() {
   }
 
   async function createVault() {
-    if (!publicClient || !vaultFactoryReady || factoryAddress === zeroAddress || !isAddress(agentAddress) || !isOwner) return;
+    if (!publicClient || !deploymentReady || factoryAddress === zeroAddress || !isAddress(agentAddress) || !isOwner) return;
     setError("");
     setPendingAction("vault");
     let vaultCreated = false;
@@ -1215,7 +1244,7 @@ function App() {
         friendlyError(
           cause,
           vaultCreated
-            ? "Vault created, but AXON could not attribute it. Retry attribution from the vault page."
+            ? "Vault created, but required AXON linking failed. Complete the vault setup step before funding it."
             : "Could not create vault.",
         ),
       );
@@ -1225,7 +1254,7 @@ function App() {
   }
 
   async function approveAndDeposit() {
-    if (!selectedVault || usdcAddress === zeroAddress || !isOwner) return;
+    if (!selectedVault || !vaultReadyForUse || usdcAddress === zeroAddress || !isOwner) return;
     setError("");
     setPendingAction("fund");
 
@@ -1254,7 +1283,7 @@ function App() {
 
   async function allowServiceReceiver(service: ServicePreset) {
     const receiver = serviceReceivers[service.id];
-    if (!selectedVault || !isAddress(receiver) || !isOwner) return;
+    if (!selectedVault || !vaultReadyForUse || !isAddress(receiver) || !isOwner) return;
     setError("");
     setPendingAction(`approve:${service.id}`);
 
@@ -1279,7 +1308,7 @@ function App() {
 
   async function payService(service: ServicePreset) {
     const receiver = serviceReceivers[service.id];
-    if (!selectedVault || !isAddress(receiver) || !canPayFromWallet) return;
+    if (!selectedVault || !vaultReadyForUse || !isAddress(receiver) || !canPayFromWallet) return;
     setError("");
     setPendingAction(`pay:${service.id}`);
 
@@ -1300,7 +1329,7 @@ function App() {
   }
 
   async function setPaused(paused: boolean) {
-    if (!selectedVault || !isOwner) return;
+    if (!selectedVault || !vaultReadyForUse || !isOwner) return;
     setError("");
     setPendingAction("pause");
 
@@ -1398,7 +1427,7 @@ function App() {
   }
 
   const canPayFromWallet =
-    Boolean(normalizedAddress && vaultAgent) && getAddress(vaultAgent!) === normalizedAddress;
+    vaultReadyForUse && Boolean(normalizedAddress && vaultAgent) && getAddress(vaultAgent!) === normalizedAddress;
   const walletConnectReady = connectors.some(isWalletConnectConnector);
   const walletConnectMissing = !walletConnectProjectId && !walletConnectReady;
   const canImportFactory =
@@ -1733,46 +1762,12 @@ function App() {
               </div>
               <div>
                 <span>Status</span>
-                <strong>{deploymentReady ? "Ready" : vaultFactoryReady ? "Factory ready" : deployStep || nextDeployStep || "Not deployed"}</strong>
+                <strong>{deploymentReady ? "Ready" : nextDeployAction?.label || deployStep || "Not deployed"}</strong>
               </div>
               <div>
                 <span>Detected</span>
                 <strong>{formatDeploymentTime(deployment?.savedAt ?? deployment?.deployedAt)}</strong>
               </div>
-              <div>
-                <span>AXON attribution</span>
-                <strong>
-                  {!registryAddress ? "Registry not configured" : deploymentAttributed ? "Registered" : vaultFactoryReady ? "Ready to register" : "After deployment"}
-                </strong>
-              </div>
-            </div>
-
-            <div className="attributionPanel">
-              <div>
-                <span>Platform attribution</span>
-                <strong>
-                  {deploymentAttributed
-                    ? "This user-owned deployment is linked to the canonical AXON registry."
-                    : registryAddress
-                      ? "Register the factory once so Arc can identify the AXON deployment path."
-                      : "The canonical AXON registry address has not been configured yet."}
-                </strong>
-                <small>
-                  AXON never becomes the owner of your factory or vault. Only the owner wallet can create and control them.
-                </small>
-              </div>
-              {registryAddress ? (
-                <button
-                  className="secondaryButton"
-                  type="button"
-                  disabled={!vaultFactoryReady || deploymentAttributed || busy || !activeDeployment}
-                  onClick={() => void attributeDeployment()}
-                >
-                  {pendingAction === "attribute" ? "Registering..." : deploymentAttributed ? "Registered with AXON" : "Register deployment"}
-                </button>
-              ) : (
-                <span className="attributionSetup">Set VITE_AXON_REGISTRY_ADDRESS after deploying the canonical registry.</span>
-              )}
             </div>
 
             <div className="faucetCallout">
@@ -1796,28 +1791,24 @@ function App() {
               </div>
             )}
 
-            {vaultFactoryReady ? (
-              <div className="deploymentActions">
+            <div className="deploymentActions">
+              {deploymentReady ? (
                 <button onClick={() => setTab("vault")}>
                   <CheckCircle2 size={18} />
                   Continue
                 </button>
-                {!deploymentReady && nextDeployAction && (
-                  <button className="secondaryButton" disabled={!walletConnected || !onArc || busy} onClick={runDeployStep}>
-                    <PlugZap size={18} />
-                    {pendingAction === "deploy" ? "Working..." : nextDeployAction.label}
-                  </button>
-                )}
+              ) : nextDeployAction ? (
+                <button disabled={!walletConnected || !onArc || busy} onClick={runDeployStep}>
+                  {pendingAction === "attribute" ? <LoaderCircle className="spin" size={18} /> : <PlugZap size={18} />}
+                  {pendingAction === "attribute" ? "Registering..." : pendingAction === "deploy" ? "Working..." : nextDeployAction.label}
+                </button>
+              ) : null}
+              {vaultFactoryReady && (
                 <button className="secondaryButton" onClick={forgetDeployment}>
                   Clear Active View
                 </button>
-              </div>
-            ) : (
-              <button disabled={!walletConnected || !onArc || busy || !nextDeployAction} onClick={runDeployStep}>
-                <PlugZap size={18} />
-                {pendingAction === "deploy" ? "Working..." : nextDeployAction?.label || "Deployment Ready"}
-              </button>
-            )}
+              )}
+            </div>
           </section>
         )}
 
@@ -1832,7 +1823,7 @@ function App() {
             </div>
 
             <div className="flowStrip" aria-label="Vault workflow">
-              <div className={vaultFactoryReady ? "flowStep ready" : "flowStep"}>
+              <div className={deploymentReady ? "flowStep ready" : "flowStep"}>
                 <CheckCircle2 size={17} />
                 <span>{vaultPrerequisiteLabel}</span>
               </div>
@@ -1865,36 +1856,6 @@ function App() {
               </div>
             </div>
 
-            {selectedVault && (
-              <div className="attributionPanel compact">
-                <div>
-                  <span>AXON vault attribution</span>
-                  <strong>
-                    {vaultAttributed
-                      ? "Vault linked to the canonical AXON deployment."
-                      : !registryAddress
-                        ? "Registry not configured"
-                        : !deploymentAttributed
-                          ? "Register the deployment first"
-                          : "Vault is ready to register"}
-                  </strong>
-                  <small>Future vault activity can be mapped to AXON through the public factory and vault link.</small>
-                </div>
-                {registryAddress ? (
-                  <button
-                    className="secondaryButton"
-                    type="button"
-                    disabled={!deploymentAttributed || vaultAttributed || busy || !activeDeployment}
-                    onClick={() => void attributeVault()}
-                  >
-                    {pendingAction === "attribute-vault" ? "Registering..." : vaultAttributed ? "Vault attributed" : "Register vault"}
-                  </button>
-                ) : (
-                  <span className="attributionSetup">Configure the canonical registry to enable vault attribution.</span>
-                )}
-              </div>
-            )}
-
             <div className="vaultSections">
               <section className="subPanel">
                 <div>
@@ -1902,6 +1863,23 @@ function App() {
                   <h4>Create policy vault</h4>
                   <p className="muted">Owner wallet creates the vault and sets the agent, limits, and optional starting whitelist.</p>
                 </div>
+                {selectedVault && registryAddress && !vaultAttributed && (
+                  <div className="requiredStep">
+                    <div>
+                      <span className="stepLabel">Required setup</span>
+                      <strong>Finish linking this vault</strong>
+                      <p className="muted">Complete one wallet transaction before funding or approving services.</p>
+                    </div>
+                    <button
+                      className="secondaryButton"
+                      type="button"
+                      disabled={!deploymentReady || busy || !activeDeployment}
+                      onClick={() => void attributeVault()}
+                    >
+                      {pendingAction === "attribute-vault" ? "Linking..." : "Finish setup"}
+                    </button>
+                  </div>
+                )}
                 <label>
                   Agent ID
                   <input value={agentName} onChange={(event) => setAgentName(event.target.value)} />
@@ -1928,7 +1906,7 @@ function App() {
                     placeholder="Optional: paste receiver wallet addresses"
                   />
                 </label>
-                <button disabled={!vaultFactoryReady || busy || !isAddress(agentAddress)} onClick={createVault}>
+                <button disabled={!deploymentReady || busy || !isAddress(agentAddress)} onClick={createVault}>
                   {pendingAction === "vault" ? <LoaderCircle className="spin" size={18} /> : <Zap size={18} />}
                   {pendingAction === "vault" ? "Creating..." : "Create Vault"}
                 </button>
@@ -1949,7 +1927,7 @@ function App() {
                   <input value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} />
                 </label>
                 <div className="actions">
-                  <button disabled={!selectedVault || busy || !isOwner} onClick={approveAndDeposit}>
+                  <button disabled={!vaultReadyForUse || busy || !isOwner} onClick={approveAndDeposit}>
                     {pendingAction === "fund" ? <LoaderCircle className="spin" size={18} /> : <CircleDollarSign size={18} />}
                     {pendingAction === "fund" ? "Funding..." : "Fund Vault"}
                   </button>
@@ -1960,7 +1938,7 @@ function App() {
                 <div className="actions single">
                   <button
                     className="secondaryButton"
-                    disabled={!selectedVault || busy || !isOwner}
+                    disabled={!vaultReadyForUse || busy || !isOwner}
                     onClick={() => setPaused(!vaultPaused)}
                   >
                     {pendingAction === "pause" ? "Updating..." : vaultPaused ? "Unpause Vault" : "Pause Vault"}
@@ -2002,6 +1980,7 @@ function App() {
                   key={service.id}
                   pendingAction={pendingAction}
                   paymentsLocked={Boolean(vaultPaused)}
+                  vaultReadyForUse={vaultReadyForUse}
                   payService={payService}
                   selectedVault={selectedVault}
                   service={service}
