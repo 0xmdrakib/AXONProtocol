@@ -123,11 +123,7 @@ h4 {
 
 .appShell {
   min-height: 100vh;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 14% 4%, rgba(247, 204, 176, 0.18), transparent 27rem),
-    radial-gradient(circle at 88% 20%, rgba(185, 212, 230, 0.15), transparent 31rem),
-    var(--cream);
+  background: var(--cream);
 }
 
 .siteHeader {
@@ -456,24 +452,6 @@ h4 {
   line-height: 1.5;
 }
 
-.iconButton {
-  width: 44px;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0;
-  border: 1px solid var(--interactive-border);
-  border-radius: 9999px;
-  color: var(--charcoal);
-  background: rgba(252, 251, 248, 0.7);
-  box-shadow: none;
-}
-
-.iconButton:hover:not(:disabled) {
-  color: var(--charcoal);
-  background: var(--surface);
-  transform: rotate(12deg);
-}
-
 .statusRow {
   margin-top: 24px;
   display: flex;
@@ -589,7 +567,7 @@ h4 {
 }
 
 .panel.wide {
-  max-width: 1040px;
+  max-width: 100%;
 }
 
 .panelHeader {
@@ -706,13 +684,13 @@ textarea:focus {
 
 .walletSummary {
   padding: 17px;
-  border: 1px solid rgba(27, 139, 112, 0.2);
+  border: 1px solid var(--border);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  background: rgba(27, 139, 112, 0.055);
+  background: var(--surface);
 }
 
 .walletSummary > div:first-child,
@@ -788,13 +766,13 @@ textarea:focus {
 
 .faucetCallout {
   padding: 16px;
-  border: 1px solid rgba(27, 139, 112, 0.18);
+  border: 1px solid var(--border);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: rgba(27, 139, 112, 0.055);
+  background: var(--surface);
 }
 
 .faucetCallout > div {
@@ -1114,6 +1092,20 @@ textarea:focus {
   font-size: 0.78rem;
 }
 
+.siteFooter {
+  margin-top: 72px;
+  padding: 24px 16px 8px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.siteFooter span {
+  display: inline-block;
+}
+
 .walletModalOverlay {
   position: fixed;
   z-index: 100;
@@ -1128,7 +1120,7 @@ textarea:focus {
 
 .walletModal {
   width: min(100%, 460px);
-  max-height: min(720px, calc(100vh - 40px));
+  max-height: calc(100vh - 64px);
   overflow: auto;
   border: 1px solid rgba(28, 28, 28, 0.12);
   border-radius: 14px;
@@ -1461,10 +1453,6 @@ textarea:focus {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 18px;
-  }
-
-  .iconButton {
-    margin-top: 2px;
   }
 
   .statusRow {

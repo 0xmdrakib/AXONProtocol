@@ -11,7 +11,6 @@ import {
   LoaderCircle,
   PlugZap,
   Power,
-  RefreshCw,
   Receipt,
   Server,
   ShieldCheck,
@@ -1243,15 +1242,6 @@ function App() {
                 {factoryAddress !== zeroAddress && <span className="statusMeta">Factory {shortAddress(factoryAddress)}</span>}
               </div>
             </div>
-            <button
-              className="iconButton"
-              type="button"
-              aria-label="Refresh balances and activity"
-              title="Refresh balances and activity"
-              onClick={() => Promise.all([refetchBalance(), refetchSpent(), refetchWalletUsdc()])}
-            >
-              <RefreshCw size={18} />
-            </button>
           </header>
 
           {error && !walletPickerOpen && (
@@ -1651,6 +1641,10 @@ function App() {
             )}
           </section>
         )}
+
+        <footer className="siteFooter">
+          <span>© 2026 Md. Rakib <span aria-hidden="true">•</span> made with love and passion.</span>
+        </footer>
         </div>
       </section>
 
