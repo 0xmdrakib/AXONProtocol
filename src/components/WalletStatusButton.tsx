@@ -39,12 +39,16 @@ export function WalletStatusButton({
         <button
           className="walletDisconnectButton"
           type="button"
-          onClick={() => onDisconnect()}
+          onClick={onDisconnect}
           disabled={isDisconnecting}
           aria-label="Disconnect wallet"
           title="Disconnect wallet"
         >
-          {isDisconnecting ? <LoaderCircle className="spin" size={16} /> : <Power size={17} />}
+          {isDisconnecting ? (
+            <LoaderCircle className="spin" size={16} aria-hidden="true" />
+          ) : (
+            <Power size={17} aria-hidden="true" />
+          )}
         </button>
       )}
     </div>
