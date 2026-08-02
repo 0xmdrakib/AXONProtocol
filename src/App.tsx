@@ -55,6 +55,7 @@ import { erc20Abi } from "./abi/ERC20";
 import { vaultFactoryAbi } from "./abi/VaultFactory";
 import { WalletPickerModal, isWalletConnectConnector } from "./components/WalletPickerModal";
 import { WalletStatusButton } from "./components/WalletStatusButton";
+import { StartHereGuide, type StartHereStep } from "./components/StartHereGuide";
 import { arcTestnet } from "./config/chains";
 import {
   clearStoredDeployment,
@@ -1165,6 +1166,78 @@ function App() {
   const walletConnectMissing = !walletConnectProjectId && !walletConnectReady;
   const canImportFactory =
     walletConnected && onArc && !busy && !importingFactory && Boolean(publicClient) && isAddress(importFactoryAddress);
+  const vaultFunded = balance !== undefined && balance > 0n;
+  const hasPaymentActivity = events.length > 0;
+
+  const openGuidedDeploy = useCallback(() => {
+    if (!walletConnected) {
+      openWalletPicker();
+      return;
+    }
+
+    if (!onArc) {
+      void requestArcNetwork();
+      return;
+    }
+
+    selectTab("deploy");
+  }, [onArc, openWalletPicker, requestArcNetwork, selectTab, walletConnected]);
+
+  const startHereSteps: StartHereStep[] = [
+    {
+      number: "01",
+      title: "Connect wallet",
+      description: "Use the owner wallet that will sign deployments, control the vault, and approve policy changes.",
+      status: walletConnected && onArc ? "Ready" : walletConnected ? "Switch network" : "Required",
+      actionLabel: walletConnected && onArc ? "Review wallet" : walletConnected ? "Switch to Arc" : "Connect wallet",
+      state: walletConnected && onArc ? "complete" : "current",
+      Icon: WalletCards,
+      onAction: walletConnected && onArc ? () => selectTab("connect") : walletConnected ? () => void requestArcNetwork() : openWalletPicker,
+      disabled: isConnecting || isSwitching,
+    },
+    {
+      number: "02",
+      title: "Deploy protocol",
+      description: "Deploy the policy, audit, routing, factory, and settlement contracts needed by your agent vault.",
+      status: deploymentReady ? "Ready" : vaultFactoryReady ? "Continue" : walletConnected && onArc ? "Next step" : "Waiting",
+      actionLabel: deploymentReady ? "Review deploy" : !walletConnected ? "Connect first" : !onArc ? "Switch to Arc" : "Open Deploy",
+      state: deploymentReady ? "complete" : walletConnected && onArc ? "current" : "upcoming",
+      Icon: PlugZap,
+      onAction: deploymentReady ? () => selectTab("deploy") : openGuidedDeploy,
+      disabled: isSwitching,
+    },
+    {
+      number: "03",
+      title: "Create and fund vault",
+      description: "Create one policy vault, set the agent limits, then deposit Arc testnet USDC for controlled spending.",
+      status: vaultFunded ? "Funded" : selectedVault ? "Created" : deploymentReady ? "Next step" : "Deploy first",
+      actionLabel: vaultFunded ? "Review vault" : "Open Vault",
+      state: vaultFunded ? "complete" : selectedVault || deploymentReady ? "current" : "upcoming",
+      Icon: Zap,
+      onAction: () => selectTab("vault"),
+    },
+    {
+      number: "04",
+      title: "Approve a service",
+      description: "Add a real receiver wallet, approve it once, and unlock an auditable payment for an API or compute task.",
+      status: hasPaymentActivity ? "Payment active" : selectedVault ? "Ready to configure" : "Vault required",
+      actionLabel: "Open Services",
+      state: hasPaymentActivity ? "complete" : selectedVault ? "current" : "upcoming",
+      Icon: Receipt,
+      onAction: () => selectTab("services"),
+    },
+    {
+      number: "05",
+      title: "Review payment proof",
+      description: "Use the audit stream to confirm recipient, amount, memo, and on-chain payment activity.",
+      status: hasPaymentActivity ? "Payment verified" : "After payment",
+      actionLabel: "Open Audit",
+      state: hasPaymentActivity ? "complete" : "upcoming",
+      Icon: TerminalSquare,
+      onAction: () => selectTab("audit"),
+    },
+  ];
+  const completedStartHereSteps = startHereSteps.filter((step) => step.state === "complete").length;
 
   return (
     <main className="appShell">
@@ -1339,6 +1412,8 @@ function App() {
             </div>
           </section>
         )}
+
+        {tab === "connect" && <StartHereGuide completedCount={completedStartHereSteps} steps={startHereSteps} />}
 
         {tab === "deploy" && (
           <section className="panel wide">
