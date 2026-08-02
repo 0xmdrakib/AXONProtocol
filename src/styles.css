@@ -412,7 +412,7 @@ h4 {
 }
 
 .workspace {
-  padding: 64px 32px 112px;
+  padding: 64px 32px 40px;
 }
 
 .workspaceInner {
@@ -1099,8 +1099,8 @@ textarea:focus {
 }
 
 .siteFooter {
-  margin-top: 72px;
-  padding: 24px 16px 8px;
+  margin-top: 40px;
+  padding: 20px 16px 4px;
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.78rem;
@@ -1405,7 +1405,7 @@ textarea:focus {
   }
 
   .workspace {
-    padding: 46px 16px 72px;
+    padding: 46px 16px 40px;
   }
 
   .topbar {
