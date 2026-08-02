@@ -1,9 +1,11 @@
 import {
   Activity,
   Bot,
+  Check,
   CheckCircle2,
   Clock3,
   CircleDollarSign,
+  Copy,
   Cpu,
   Database,
   FileSearch,
@@ -481,6 +483,7 @@ function App() {
   const [deployStep, setDeployStep] = useState<DeployStep | null>(null);
   const [walletSession, setWalletSession] = useState<ConnectedWalletSession | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [copiedAddress, setCopiedAddress] = useState<Address | null>(null);
   const [error, setError] = useState("");
 
   const openWalletPicker = useCallback(() => {
@@ -493,6 +496,24 @@ function App() {
     setTab(nextTab);
     setMobileNavOpen(false);
   }, []);
+
+  async function copyAddress(value: Address | undefined, label: string) {
+    if (!value || value === zeroAddress) return;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard is unavailable.");
+      }
+
+      await navigator.clipboard.writeText(value);
+      setCopiedAddress(value);
+      window.setTimeout(() => {
+        setCopiedAddress((current) => (current === value ? null : current));
+      }, 1800);
+    } catch {
+      setError(`Could not copy ${label}.`);
+    }
+  }
 
   const selectedConnection =
     connections.find((connection) => connection.connector.uid === walletSession?.connector.uid) ?? connections[0];
@@ -1686,7 +1707,21 @@ function App() {
               </div>
               <div>
                 <span>Vault Factory</span>
-                <strong>{factoryAddress !== zeroAddress ? shortAddress(factoryAddress) : "Not imported"}</strong>
+                <strong className="addressValue">
+                  <span>{factoryAddress !== zeroAddress ? shortAddress(factoryAddress) : "Not imported"}</span>
+                  {factoryAddress !== zeroAddress && (
+                    <button
+                      className="copyButton"
+                      type="button"
+                      aria-label="Copy Vault Factory address"
+                      title={copiedAddress === factoryAddress ? "Copied" : "Copy Vault Factory address"}
+                      onClick={() => void copyAddress(factoryAddress, "Vault Factory address")}
+                    >
+                      {copiedAddress === factoryAddress ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+                    </button>
+                  )}
+                </strong>
+                {copiedAddress === factoryAddress && <small className="copyFeedback" aria-live="polite">Copied</small>}
               </div>
               <div>
                 <span>USDC</span>

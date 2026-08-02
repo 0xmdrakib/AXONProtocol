@@ -1028,6 +1028,47 @@ textarea:focus {
   font-weight: 400;
 }
 
+.deploymentGrid .addressValue {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.addressValue > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--charcoal) !important;
+  font-size: inherit !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copyButton {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid var(--interactive-border);
+  border-radius: 6px;
+  color: var(--strong-muted);
+  background: var(--surface);
+  box-shadow: none;
+  line-height: 0;
+}
+
+.copyButton:hover:not(:disabled) {
+  color: var(--charcoal);
+  background: var(--soft);
+  transform: none;
+}
+
+.copyFeedback {
+  color: var(--success) !important;
+  font-size: 0.7rem !important;
+}
+
 .restorePanel,
 .importPanel,
 .deployNext,
