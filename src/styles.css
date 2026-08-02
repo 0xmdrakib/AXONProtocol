@@ -180,15 +180,29 @@ h4 {
 }
 
 .brandCopy strong {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   font-size: 1.05rem;
   line-height: 1;
   letter-spacing: 0.03em;
+}
+
+.brandProtocol {
+  color: var(--strong-muted);
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .brandCopy small {
   color: var(--muted);
   font-size: 0.72rem;
   line-height: 1.2;
+}
+
+.brandProtocolMobile {
+  display: none;
 }
 
 .mainNav {
@@ -1439,7 +1453,19 @@ textarea:focus {
 
 @media (max-width: 600px) {
   .brandCopy small {
+    display: block;
+  }
+
+  .brandProtocol {
     display: none;
+  }
+
+  .brandTagline {
+    display: none;
+  }
+
+  .brandProtocolMobile {
+    display: inline;
   }
 
   .walletStatusLabel > span {

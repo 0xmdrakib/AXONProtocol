@@ -1170,11 +1170,16 @@ function App() {
     <main className="appShell">
       <header className="siteHeader">
         <div className="headerInner">
-          <button className="brand" type="button" onClick={() => selectTab("connect")} aria-label="Open AXON overview">
+          <button className="brand" type="button" onClick={() => selectTab("connect")} aria-label="Open AXON Protocol overview">
             <img className="brandLogo" src="/axon-symbol.png" alt="" aria-hidden="true" />
             <span className="brandCopy">
-              <strong>AXON</strong>
-              <small>Agent banking console</small>
+              <strong>
+                AXON <span className="brandProtocol">Protocol</span>
+              </strong>
+              <small>
+                <span className="brandTagline">Agent banking console</span>
+                <span className="brandProtocolMobile">Protocol</span>
+              </small>
             </span>
           </button>
 
