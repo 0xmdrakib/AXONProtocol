@@ -73,6 +73,28 @@ describe("AXON Protocol", async function () {
     assert.equal(getAddress(await registry.read.factoryOfVault([vaultAddress])), getAddress(factory.address));
     assert.equal(getAddress(await vault.read.owner()), getAddress(owner.account.address));
 
+    const legacyAgentId = keccak256(toBytes("legacy-attribution-agent-002"));
+    const legacyCreateHash = await factory.write.createVault([
+      legacyAgentId,
+      agent.account.address,
+      parseUnits("5", 6),
+      parseUnits("2", 6),
+      [recipient.account.address],
+    ]);
+    const legacyReceipt = await publicClient.waitForTransactionReceipt({ hash: legacyCreateHash });
+    const legacyEvents = await publicClient.getContractEvents({
+      address: factory.address,
+      abi: factory.abi,
+      eventName: "VaultDeployed",
+      fromBlock: legacyReceipt.blockNumber,
+      toBlock: legacyReceipt.blockNumber,
+      strict: true,
+    });
+    const legacyVaultAddress = getAddress(legacyEvents[0].args.vault);
+
+    await registry.write.registerExistingVault([factory.address, legacyVaultAddress]);
+    assert.equal(getAddress(await registry.read.factoryOfVault([legacyVaultAddress])), getAddress(factory.address));
+
     await assert.rejects(
       registry.write.registerDeployment([factory.address, "axon-web/0.1.0"], { account: stranger.account }),
       /FactoryAlreadyRegistered/,

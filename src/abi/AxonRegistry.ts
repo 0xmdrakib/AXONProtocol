@@ -57,6 +57,16 @@ export const axonRegistryAbi = [
     outputs: [],
   },
   {
+    type: "function",
+    name: "registerExistingVault",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "factory", type: "address" },
+      { name: "vault", type: "address" },
+    ],
+    outputs: [],
+  },
+  {
     type: "event",
     name: "DeploymentRegistered",
     anonymous: false,

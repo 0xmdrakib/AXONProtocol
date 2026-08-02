@@ -934,7 +934,7 @@ function App() {
     return deploymentId;
   }
 
-  async function registerVaultOnRegistry(deploymentToRegister: DeploymentFile, vault: Address, vaultAgentId: Hex) {
+  async function registerVaultOnRegistry(deploymentToRegister: DeploymentFile, vault: Address, vaultAgentId?: Hex) {
     if (!registryAddress) {
       throw new Error("AXON attribution is not configured for this deployment.");
     }
@@ -962,26 +962,34 @@ function App() {
       saveDeploymentProgress({
         ...deploymentToRegister,
         registry: registryAddress,
-        agentId: vaultAgentId,
+        ...(vaultAgentId ? { agentId: vaultAgentId } : {}),
         vault: normalizedVault,
         vaultAttributed: true,
       });
       return;
     }
 
-    const hash = await writeContractAsync({
-      address: registryAddress,
-      abi: axonRegistryAbi,
-      functionName: "registerVault",
-      args: [factory, vaultAgentId, normalizedVault],
-      chainId: arcTestnet.id,
-    });
+    const hash = vaultAgentId
+      ? await writeContractAsync({
+          address: registryAddress,
+          abi: axonRegistryAbi,
+          functionName: "registerVault",
+          args: [factory, vaultAgentId, normalizedVault],
+          chainId: arcTestnet.id,
+        })
+      : await writeContractAsync({
+          address: registryAddress,
+          abi: axonRegistryAbi,
+          functionName: "registerExistingVault",
+          args: [factory, normalizedVault],
+          chainId: arcTestnet.id,
+        });
     await publicClient.waitForTransactionReceipt({ hash });
 
     saveDeploymentProgress({
       ...deploymentToRegister,
       registry: registryAddress,
-      agentId: vaultAgentId,
+      ...(vaultAgentId ? { agentId: vaultAgentId } : {}),
       vault: normalizedVault,
       vaultAttributed: true,
     });
@@ -1003,7 +1011,7 @@ function App() {
   }
 
   async function attributeVault() {
-    if (!activeDeployment || !selectedVault || !activeDeployment.agentId) return;
+    if (!activeDeployment || !selectedVault) return;
     setError("");
     setPendingAction("attribute-vault");
 
@@ -1841,7 +1849,7 @@ function App() {
                   <button
                     className="secondaryButton"
                     type="button"
-                    disabled={!deploymentAttributed || vaultAttributed || busy || !activeDeployment?.agentId}
+                    disabled={!deploymentAttributed || vaultAttributed || busy || !activeDeployment}
                     onClick={() => void attributeVault()}
                   >
                     {pendingAction === "attribute-vault" ? "Registering..." : vaultAttributed ? "Vault attributed" : "Register vault"}

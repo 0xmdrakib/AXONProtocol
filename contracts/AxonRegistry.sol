@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 interface IFactoryOwner {
     function owner() external view returns (address);
     function vaultOfAgent(bytes32 agentId) external view returns (address);
+    function vaultsByOwner(address owner) external view returns (address[] memory);
 }
 
 interface IVaultOwner {
@@ -95,8 +96,35 @@ contract AxonRegistry {
         DeploymentRecord storage deployment = deployments[factory];
         if (deployment.deploymentId == bytes32(0)) revert UnknownFactory();
         if (deployment.deployer != msg.sender) revert DeploymentOwnerRequired();
-        if (factoryOfVault[vault] != address(0)) revert VaultAlreadyAttributed();
         if (IFactoryOwner(factory).vaultOfAgent(agentId) != vault) revert InvalidVault();
+
+        _attributeVault(deployment, factory, vault, agentId);
+    }
+
+    /// @notice Link an older user-owned vault when its original agent ID is not available locally.
+    /// @dev Membership in the factory's owner list and vault ownership are both checked.
+    function registerExistingVault(address factory, address vault) external {
+        if (factory == address(0) || vault == address(0)) revert ZeroAddress();
+
+        DeploymentRecord storage deployment = deployments[factory];
+        if (deployment.deploymentId == bytes32(0)) revert UnknownFactory();
+        if (deployment.deployer != msg.sender) revert DeploymentOwnerRequired();
+
+        address[] memory ownedVaults = IFactoryOwner(factory).vaultsByOwner(msg.sender);
+        bool found;
+        for (uint256 index = 0; index < ownedVaults.length; index++) {
+            if (ownedVaults[index] == vault) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) revert InvalidVault();
+
+        _attributeVault(deployment, factory, vault, bytes32(0));
+    }
+
+    function _attributeVault(DeploymentRecord storage deployment, address factory, address vault, bytes32 agentId) internal {
+        if (factoryOfVault[vault] != address(0)) revert VaultAlreadyAttributed();
         if (IVaultOwner(vault).owner() != msg.sender) revert InvalidVault();
 
         factoryOfVault[vault] = factory;
