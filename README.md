@@ -49,19 +49,6 @@ AXON does not use a backend deployer wallet.
 
 For the demo, keep the Agent wallet as the connected deployer wallet. For a real agent setup, the agent address can be a dedicated signer, smart account, or session-key wallet that calls `pay(receiver, amount, memo)`.
 
-## Platform Attribution
-
-AXON uses an optional, non-custodial `AxonRegistry` to make official usage discoverable on-chain. The registry records the user-owned Vault Factory and links each user-owned vault to that factory through `DeploymentRegistered` and `VaultAttributed` events.
-
-- The platform wallet deploys the canonical `AxonRegistry` once on Arc.
-- Set its address as `VITE_AXON_REGISTRY_ADDRESS` before building the app.
-- The connected user wallet signs the attribution transactions and remains the owner of the factory and vault.
-- The registry cannot withdraw funds, change policy, pause a vault, or control a user contract.
-
-To activate it, compile `AxonRegistry.sol`, deploy it on Arc with the platform wallet, copy the deployed address into the hosting environment as `VITE_AXON_REGISTRY_ADDRESS`, and rebuild the frontend. Do not put a user’s private key in the frontend or commit it to the repository.
-
-This creates a verifiable AXON attribution trail for Arc ecosystem reviews, analytics, and future programs. It proves that the user registered a deployment with the canonical AXON registry; it cannot prove that a transaction came from a specific hosted URL if someone uses a fork or calls the contracts directly.
-
 ## Supported Network
 
 ```text
